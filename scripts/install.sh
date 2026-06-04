@@ -113,8 +113,13 @@ for entry in sorted(os.listdir(plugins_dir)):
     try:
         with open(pjson) as f:
             data = json.load(f)
+        name = data.get("name", entry)
+        import re
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]*$', name):
+            print(f"Skipping plugin with unsafe name: {name!r}", file=sys.stderr)
+            continue
         result.append({
-            "name": data.get("name", entry),
+            "name": name,
             "description": data.get("description", ""),
             "version": data.get("version", "1.0.0"),
         })
@@ -140,10 +145,14 @@ print(json.dumps([p for p in plugins if p['name'] in allowed]))
 " "$all_json" "$PLUGIN_FILTER"
 }
 
-# Read version from a plugin directory
+# Read version from a plugin directory (reads path from argv, not interpolated)
 get_version() {
     local plugin_src="$1"
-    python3 -c "import json; print(json.load(open('$plugin_src/.claude-plugin/plugin.json')).get('version','1.0.0'))" 2>/dev/null || echo "1.0.0"
+    python3 - "$plugin_src/.claude-plugin/plugin.json" <<'PYEOF' 2>/dev/null || echo "1.0.0"
+import json, sys
+with open(sys.argv[1]) as f:
+    print(json.load(f).get("version", "1.0.0"))
+PYEOF
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -356,6 +365,8 @@ with open(source_path) as f:
     source = json.load(f)
 
 for name, server in source.get("mcpServers", {}).items():
+    if name in config["mcpServers"] and config["mcpServers"][name] != server:
+        print(f"Updating existing MCP server: {name}", file=sys.stderr)
     config["mcpServers"][name] = server
 
 with open(target_path, "w") as f:

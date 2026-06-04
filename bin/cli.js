@@ -27,7 +27,10 @@ function detectClients() {
 
 function parseRepoArg(arg) {
   if (!arg) return null;
-  if (arg.startsWith("https://") || arg.startsWith("http://")) {
+  if (arg.startsWith("http://")) {
+    arg = arg.replace(/^http:\/\//, "https://");
+  }
+  if (arg.startsWith("https://")) {
     const name = arg.replace(/\.git$/, "").split("/").pop();
     return { url: arg.replace(/\.git$/, "") + ".git", name };
   }

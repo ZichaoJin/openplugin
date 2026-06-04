@@ -39,6 +39,26 @@ function parseRepoArg(arg) {
 }
 
 // ─── TUI checkbox selector ──────────────────────────────────────────
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function fitToWidth(str, maxWidth) {
+  const plain = stripAnsi(str);
+  if (plain.length <= maxWidth) return str;
+  let vis = 0;
+  let out = "";
+  for (let i = 0; i < str.length; ) {
+    if (str[i] === "\x1b") {
+      const m = str.slice(i).match(/^\x1b\[[0-9;]*m/);
+      if (m) { out += m[0]; i += m[0].length; continue; }
+    }
+    if (vis >= maxWidth - 1) return out + "…\x1b[0m";
+    out += str[i]; vis++; i++;
+  }
+  return out;
+}
+
 function checkbox(title, items) {
   return new Promise((resolve) => {
     const selected = new Array(items.length).fill(true);
@@ -70,8 +90,9 @@ function checkbox(title, items) {
     }
 
     function draw() {
+      const cols = process.stdout.columns || 80;
       process.stdout.write(
-        `${BLUE}?${RESET} ${title} ${DIM}(space=toggle, enter=confirm)${RESET}\n`
+        fitToWidth(`${BLUE}?${RESET} ${title} ${DIM}(space=toggle, enter=confirm)${RESET}`, cols) + "\n"
       );
       for (let i = 0; i < items.length; i++) {
         const pointer = i === cursor ? `${BLUE}❯${RESET}` : " ";
@@ -79,7 +100,7 @@ function checkbox(title, items) {
         const desc = items[i].description
           ? ` ${DIM}— ${items[i].description}${RESET}`
           : "";
-        process.stdout.write(`  ${pointer} ${check} ${items[i].label}${desc}\n`);
+        process.stdout.write(fitToWidth(`  ${pointer} ${check} ${items[i].label}${desc}`, cols) + "\n");
       }
       process.stdout.write("\n");
     }

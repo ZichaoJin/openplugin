@@ -48,7 +48,7 @@ function stripAnsi(str) {
 
 function fitToWidth(str, maxWidth) {
   const plain = stripAnsi(str);
-  if (plain.length <= maxWidth) return str;
+  if ([...plain].length <= maxWidth) return str;
   let vis = 0;
   let out = "";
   for (let i = 0; i < str.length; ) {
@@ -57,7 +57,9 @@ function fitToWidth(str, maxWidth) {
       if (m) { out += m[0]; i += m[0].length; continue; }
     }
     if (vis >= maxWidth - 1) return out + "…\x1b[0m";
-    out += str[i]; vis++; i++;
+    const cp = str.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    out += ch; vis++; i += ch.length;
   }
   return out;
 }

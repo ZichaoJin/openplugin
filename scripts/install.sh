@@ -20,31 +20,39 @@ warn()   { echo -e "${YELLOW}[warn]${NC}  $*"; }
 err()    { echo -e "${RED}[error]${NC} $*" >&2; }
 banner() { echo -e "\n${BLUE}━━━ $* ━━━${NC}"; }
 
-# ─── Dependency check ────────────────────────────────────────────────
-missing=""
-for cmd in git python3 rsync; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        missing="$missing $cmd"
-    fi
-done
-if [[ -n "$missing" ]]; then
-    echo -e "${RED}[error]${NC} Missing required dependencies:${missing}" >&2
-    echo "" >&2
-    echo "  Install them with:" >&2
-    if [[ "$(uname)" == "Darwin" ]]; then
-        echo "    brew install${missing}" >&2
-    elif command -v apt-get >/dev/null 2>&1; then
-        echo "    sudo apt-get install -y${missing}" >&2
-    elif command -v yum >/dev/null 2>&1; then
-        echo "    sudo yum install -y${missing}" >&2
-    else
-        echo "    Use your package manager to install:${missing}" >&2
-    fi
-    exit 1
-fi
-
 # ─── Parse command ────────────────────────────────────────────────────
 COMMAND="${1:?Usage: install.sh <discover|install|uninstall>}"
+
+# ─── Dependency check (per command) ──────────────────────────────────
+check_deps() {
+    local missing=""
+    for cmd in "$@"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing="$missing $cmd"
+        fi
+    done
+    if [[ -n "$missing" ]]; then
+        echo -e "${RED}[error]${NC} Missing required dependencies:${missing}" >&2
+        echo "" >&2
+        echo "  Install them with:" >&2
+        if [[ "$(uname)" == "Darwin" ]]; then
+            echo "    brew install${missing}" >&2
+        elif command -v apt-get >/dev/null 2>&1; then
+            echo "    sudo apt-get install -y${missing}" >&2
+        elif command -v yum >/dev/null 2>&1; then
+            echo "    sudo yum install -y${missing}" >&2
+        else
+            echo "    Use your package manager to install:${missing}" >&2
+        fi
+        exit 1
+    fi
+}
+
+case "$COMMAND" in
+    discover)       check_deps git python3 ;;
+    install)        check_deps git python3 rsync ;;
+    uninstall)      check_deps python3 ;;
+esac
 
 # ─── Client detection ────────────────────────────────────────────────
 has_claude()     { command -v claude >/dev/null 2>&1; }
@@ -219,7 +227,7 @@ with open(config_path) as f:
 
 # --- Helper: upsert a [section] with key=value pairs (idempotent) ---
 def upsert_section(text, header, kv_pairs):
-    pat = re.compile(rf'(\[{re.escape(header)}\][ \t]*\n)(.*?)(?=\n\[|\Z)', re.S)
+    pat = re.compile(rf'(\[{re.escape(header)}\][ \t]*\n)(.*?)(?=^\[|\Z)', re.S | re.M)
     m = pat.search(text)
     if m:
         body = m.group(2)
@@ -248,7 +256,8 @@ EVENT_MAP = {
 }
 
 # Compute trust hashes for each hook command
-hooks = json.load(open(hooks_path))
+with open(hooks_path) as f:
+    hooks = json.load(f)
 for evt_name, groups in hooks.get("hooks", {}).items():
     snake = EVENT_MAP.get(evt_name, evt_name.lower())
     for i, group in enumerate(groups or []):
@@ -282,6 +291,7 @@ install_plugin_to_qoderwork() {
     rsync -a --delete \
         --exclude '__pycache__' \
         --exclude '.DS_Store' \
+        --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
 
     # Built-in QoderWork hook registration (no external script needed)
@@ -311,7 +321,8 @@ settings = json.loads(text)
 
 with open(hooks_path) as f:
     template = json.load(f)
-template_str = json.dumps(template).replace("__PLUGIN_ROOT__", plugin_root)
+escaped_root = json.dumps(plugin_root)[1:-1]
+template_str = json.dumps(template).replace("__PLUGIN_ROOT__", escaped_root)
 template = json.loads(template_str)
 
 settings.setdefault("hooks", {})
@@ -515,7 +526,7 @@ try:
         print(','.join(d.get('mcp_keys', [])))
     else:
         print('__NO_MATCH__')
-except: print('__NO_MATCH__')
+except Exception: print('__NO_MATCH__')
 " "$meta" "$MARKETPLACE_NAME" 2>/dev/null || echo "__NO_MATCH__")
                 if [[ "$meta_match" != "__NO_MATCH__" ]]; then
                     matched=true
@@ -538,7 +549,7 @@ try:
     d = json.load(open(sys.argv[1]))
     repo = d.get('repository','') or d.get('homepage','')
     print('yes' if sys.argv[2] in repo else 'no')
-except: print('no')
+except Exception: print('no')
 " "$pjson" "$MARKETPLACE_NAME" 2>/dev/null || echo "no")
                     if [[ "$repo_match" == "yes" ]]; then
                         matched=true
@@ -550,7 +561,7 @@ import json, sys
 try:
     d = json.load(open(sys.argv[1]))
     print(','.join(d.get('mcpServers', {}).keys()))
-except: pass
+except Exception: pass
 " "$plugin_dir/.mcp.json" 2>/dev/null || true)
                             IFS=',' read -ra keys <<< "$fallback_keys"
                             for k in "${keys[@]}"; do

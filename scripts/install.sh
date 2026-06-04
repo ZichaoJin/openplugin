@@ -346,9 +346,20 @@ PYEOF
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoderwork/mcp.json
     # (QoderWork wrapper mode: only reads global mcp.json, won't discover plugin .mcp.json)
+    local mcp_keys=""
     if [[ -f "$plugin_src/.mcp.json" ]]; then
+        local mcp_config="${HOME}/.qoderwork/mcp.json"
+
+        # Backup mcp.json before modifying
+        if [[ -f "$mcp_config" ]]; then
+            local mcp_ts
+            mcp_ts=$(date +%s).$$
+            cp "$mcp_config" "$mcp_config.bak.$mcp_ts"
+            info "  Backup: $mcp_config.bak.$mcp_ts"
+        fi
+
         info "  Configuring MCP for ${plugin_name}..."
-        python3 - "${HOME}/.qoderwork/mcp.json" "$plugin_src/.mcp.json" <<'PYEOF'
+        mcp_keys=$(python3 - "${mcp_config}" "$plugin_src/.mcp.json" <<'PYEOF'
 import json, sys, os
 
 target_path, source_path = sys.argv[1:]
@@ -364,16 +375,34 @@ config.setdefault("mcpServers", {})
 with open(source_path) as f:
     source = json.load(f)
 
+keys = []
 for name, server in source.get("mcpServers", {}).items():
     if name in config["mcpServers"] and config["mcpServers"][name] != server:
         print(f"Updating existing MCP server: {name}", file=sys.stderr)
     config["mcpServers"][name] = server
+    keys.append(name)
 
 with open(target_path, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
+
+print(",".join(keys))
 PYEOF
+)
     fi
+
+    # Write metadata for clean uninstall (records marketplace + MCP keys)
+    python3 - "$dest/.openplugin-meta.json" "$MARKETPLACE_NAME" "$mcp_keys" <<'PYEOF'
+import json, sys
+path, marketplace, mcp_keys_str = sys.argv[1:]
+meta = {
+    "marketplace": marketplace,
+    "mcp_keys": [k for k in mcp_keys_str.split(",") if k],
+}
+with open(path, "w") as f:
+    json.dump(meta, f, indent=2)
+    f.write("\n")
+PYEOF
 
     ok "  ${plugin_name} → QoderWork"
 }
@@ -460,35 +489,83 @@ PYEOF
 uninstall_qoderwork() {
     banner "QoderWork — uninstall"
 
-    # Discover installed plugins by scanning plugins-custom directory
+    # Scan plugins-custom: collect metadata BEFORE deleting
     local custom_dir="${HOME}/.qoderwork/plugins-custom"
     local removed_any=false
     local plugin_prefixes=()
+    local all_mcp_keys=()
 
     if [[ -d "$custom_dir" ]]; then
         for plugin_dir in "$custom_dir"/*/; do
             [[ -d "$plugin_dir" ]] || continue
             local pname
             pname="$(basename "$plugin_dir")"
-            # Check if this plugin belongs to our marketplace by reading plugin.json
-            local pjson="$plugin_dir/.claude-plugin/plugin.json"
-            if [[ -f "$pjson" ]]; then
-                local repo_match
-                repo_match=$(python3 -c "
+
+            # Match by .openplugin-meta.json (preferred) or fallback to plugin.json
+            local meta="$plugin_dir/.openplugin-meta.json"
+            local matched=false
+
+            if [[ -f "$meta" ]]; then
+                local meta_match
+                meta_match=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    if d.get('marketplace') == sys.argv[2]:
+        print(','.join(d.get('mcp_keys', [])))
+    else:
+        print('__NO_MATCH__')
+except: print('__NO_MATCH__')
+" "$meta" "$MARKETPLACE_NAME" 2>/dev/null || echo "__NO_MATCH__")
+                if [[ "$meta_match" != "__NO_MATCH__" ]]; then
+                    matched=true
+                    # Collect MCP keys from metadata
+                    IFS=',' read -ra keys <<< "$meta_match"
+                    for k in "${keys[@]}"; do
+                        [[ -n "$k" ]] && all_mcp_keys+=("$k")
+                    done
+                fi
+            fi
+
+            # Fallback: match by plugin.json repository/homepage
+            if [[ "$matched" == "false" ]]; then
+                local pjson="$plugin_dir/.claude-plugin/plugin.json"
+                if [[ -f "$pjson" ]]; then
+                    local repo_match
+                    repo_match=$(python3 -c "
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
     repo = d.get('repository','') or d.get('homepage','')
-    # Match if marketplace name appears in the repo URL
     print('yes' if sys.argv[2] in repo else 'no')
 except: print('no')
 " "$pjson" "$MARKETPLACE_NAME" 2>/dev/null || echo "no")
-                if [[ "$repo_match" == "yes" ]]; then
-                    rm -rf "$plugin_dir"
-                    ok "Removed ${plugin_dir}"
-                    plugin_prefixes+=("${pname}/")
-                    removed_any=true
+                    if [[ "$repo_match" == "yes" ]]; then
+                        matched=true
+                        # Try to read MCP keys from .mcp.json before deletion
+                        if [[ -f "$plugin_dir/.mcp.json" ]]; then
+                            local fallback_keys
+                            fallback_keys=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(','.join(d.get('mcpServers', {}).keys()))
+except: pass
+" "$plugin_dir/.mcp.json" 2>/dev/null || true)
+                            IFS=',' read -ra keys <<< "$fallback_keys"
+                            for k in "${keys[@]}"; do
+                                [[ -n "$k" ]] && all_mcp_keys+=("$k")
+                            done
+                        fi
+                    fi
                 fi
+            fi
+
+            if [[ "$matched" == "true" ]]; then
+                rm -rf "$plugin_dir"
+                ok "Removed ${plugin_dir}"
+                plugin_prefixes+=("${pname}/")
+                removed_any=true
             fi
         done
     fi
@@ -553,29 +630,31 @@ else:
 PYEOF
     fi
 
-    # Remove MCP entries
+    # Remove MCP entries by exact keys (collected from metadata before deletion)
     local mcp_config="${HOME}/.qoderwork/mcp.json"
-    if [[ -f "$mcp_config" ]]; then
+    if [[ -f "$mcp_config" && ${#all_mcp_keys[@]} -gt 0 ]]; then
         info "Removing MCP server entries..."
-        python3 - "$mcp_config" "$MARKETPLACE_NAME" <<'PYEOF'
+        local keys_json
+        keys_json=$(printf '%s\n' "${all_mcp_keys[@]}" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
+        python3 - "$mcp_config" "$keys_json" <<'PYEOF'
 import json, sys
 
-path, marketplace = sys.argv[1:]
+path, keys_json = sys.argv[1:]
+keys = json.loads(keys_json)
+
 with open(path) as f:
     config = json.load(f)
 
 servers = config.get("mcpServers", {})
-to_remove = [k for k in servers if marketplace in k]
-changed = False
-for k in to_remove:
+removed = [k for k in keys if k in servers]
+for k in removed:
     del servers[k]
-    changed = True
 
-if changed:
+if removed:
     with open(path, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
-    print(f"Removed {len(to_remove)} MCP entries from {path}")
+    print(f"Removed {len(removed)} MCP entries: {', '.join(removed)}")
 else:
     print("No MCP entries to remove.")
 PYEOF

@@ -20,6 +20,29 @@ warn()   { echo -e "${YELLOW}[warn]${NC}  $*"; }
 err()    { echo -e "${RED}[error]${NC} $*" >&2; }
 banner() { echo -e "\n${BLUE}━━━ $* ━━━${NC}"; }
 
+# ─── Dependency check ────────────────────────────────────────────────
+missing=""
+for cmd in git python3 rsync; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        missing="$missing $cmd"
+    fi
+done
+if [[ -n "$missing" ]]; then
+    echo -e "${RED}[error]${NC} Missing required dependencies:${missing}" >&2
+    echo "" >&2
+    echo "  Install them with:" >&2
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "    brew install${missing}" >&2
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo "    sudo apt-get install -y${missing}" >&2
+    elif command -v yum >/dev/null 2>&1; then
+        echo "    sudo yum install -y${missing}" >&2
+    else
+        echo "    Use your package manager to install:${missing}" >&2
+    fi
+    exit 1
+fi
+
 # ─── Parse command ────────────────────────────────────────────────────
 COMMAND="${1:?Usage: install.sh <discover|install|uninstall>}"
 

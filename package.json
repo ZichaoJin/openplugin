@@ -1,6 +1,6 @@
 {
   "name": "openplugin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Install AI coding agent plugins from GitHub — supports Claude Code, Codex, QoderWork",
   "bin": {
     "openplugin": "./bin/cli.js"

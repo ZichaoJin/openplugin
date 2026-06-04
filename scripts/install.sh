@@ -163,10 +163,78 @@ install_plugin_to_codex() {
         --exclude '.DS_Store' \
         "$plugin_src/" "$dest/"
 
-    local hook_script="$dest/tools/codex/enable-codex-hooks.sh"
-    if [[ -f "$hook_script" ]]; then
+    # Built-in Codex hook registration (no external script needed)
+    local hooks_json="$dest/hooks/codex-hooks.json"
+    if [[ -f "$hooks_json" ]]; then
+        local config="${HOME}/.codex/config.toml"
+        mkdir -p "$(dirname "$config")"
+        [[ -f "$config" ]] || printf '' > "$config"
+
+        # Backup
+        local ts
+        ts=$(date +%s).$$
+        cp "$config" "$config.bak.$ts"
+        info "  Backup: $config.bak.$ts"
+
         info "  Enabling hooks for ${plugin_name}..."
-        bash "$hook_script"
+        python3 - "$config" "$hooks_json" "$MARKETPLACE_NAME" "$plugin_name" <<'PYEOF'
+import hashlib, json, re, sys
+
+config_path, hooks_path, marketplace, plugin_name = sys.argv[1:]
+
+with open(config_path) as f:
+    text = f.read()
+
+# --- Helper: upsert a [section] with key=value pairs (idempotent) ---
+def upsert_section(text, header, kv_pairs):
+    pat = re.compile(rf'(\[{re.escape(header)}\][ \t]*\n)(.*?)(?=\n\[|\Z)', re.S)
+    m = pat.search(text)
+    if m:
+        body = m.group(2)
+        for k, _ in kv_pairs:
+            body = re.sub(rf'(?m)^{re.escape(k)}\s*=.*\n?', '', body)
+        body = body.rstrip()
+        addition = "".join(f"{k} = {v}\n" for k, v in kv_pairs)
+        new_body = (body + "\n" if body else "") + addition
+        return text[:m.start(2)] + new_body + text[m.end(2):]
+    sep = "" if text.endswith("\n") or text == "" else "\n"
+    body = "".join(f"{k} = {v}\n" for k, v in kv_pairs)
+    return text + f"{sep}[{header}]\n{body}"
+
+# Enable feature flags
+text = upsert_section(text, "features", [("hooks", "true"), ("plugin_hooks", "true")])
+
+# Register plugin
+text = upsert_section(text, f'plugins."{plugin_name}@{marketplace}"', [("enabled", "true")])
+
+# Event name mapping (PascalCase → snake_case as Codex expects)
+EVENT_MAP = {
+    "PreToolUse": "pre_tool_use",
+    "PostToolUse": "post_tool_use",
+    "UserPromptSubmit": "user_prompt_submit",
+    "Stop": "stop",
+}
+
+# Compute trust hashes for each hook command
+hooks = json.load(open(hooks_path))
+for evt_name, groups in hooks.get("hooks", {}).items():
+    snake = EVENT_MAP.get(evt_name, evt_name.lower())
+    for i, group in enumerate(groups or []):
+        for j, h in enumerate(group.get("hooks") or []):
+            cmd = h.get("command", "")
+            if not cmd:
+                continue
+            digest = "sha256:" + hashlib.sha256(cmd.encode("utf-8")).hexdigest()
+            section = f'hooks.state."{marketplace}:hooks/codex-hooks.json:{snake}:{i}:{j}"'
+            text = upsert_section(text, section, [
+                ("enabled", "true"),
+                ("trusted_hash", f'"{digest}"'),
+            ])
+
+with open(config_path, "w") as f:
+    f.write(text)
+print(f"  Updated: {config_path}")
+PYEOF
     fi
 
     ok "  ${plugin_name} (v${version}) → Codex CLI"
@@ -184,13 +252,68 @@ install_plugin_to_qoderwork() {
         --exclude '.DS_Store' \
         "$plugin_src/" "$dest/"
 
-    local hook_script="$dest/tools/qoderwork/enable-qoderwork-hooks.sh"
-    if [[ -f "$hook_script" ]]; then
+    # Built-in QoderWork hook registration (no external script needed)
+    local hooks_json="$dest/hooks/qoderwork-hooks.json"
+    if [[ -f "$hooks_json" ]]; then
+        local settings="${HOME}/.qoderwork/settings.json"
+        mkdir -p "$(dirname "$settings")"
+
+        if [[ -f "$settings" ]]; then
+            local ts
+            ts=$(date +%s).$$
+            cp "$settings" "$settings.bak.$ts"
+            info "  Backup: $settings.bak.$ts"
+        else
+            echo '{}' > "$settings"
+        fi
+
         info "  Enabling hooks for ${plugin_name}..."
-        bash "$hook_script"
+        python3 - "$settings" "$hooks_json" "$dest" "${plugin_name}/" <<'PYEOF'
+import json, sys
+
+settings_path, hooks_path, plugin_root, name_prefix = sys.argv[1:]
+
+with open(settings_path) as f:
+    text = f.read().strip() or "{}"
+settings = json.loads(text)
+
+with open(hooks_path) as f:
+    template = json.load(f)
+template_str = json.dumps(template).replace("__PLUGIN_ROOT__", plugin_root)
+template = json.loads(template_str)
+
+settings.setdefault("hooks", {})
+hooks_root = settings["hooks"]
+
+owned = lambda h: isinstance(h, dict) and isinstance(h.get("name"), str) \
+    and h["name"].startswith(name_prefix)
+
+for event, new_groups in template.get("hooks", {}).items():
+    existing = hooks_root.get(event)
+    if not isinstance(existing, list):
+        existing = []
+    pruned = []
+    for grp in existing:
+        if not isinstance(grp, dict):
+            pruned.append(grp); continue
+        inner = grp.get("hooks") or []
+        kept = [h for h in inner if not owned(h)]
+        if kept:
+            new_grp = dict(grp)
+            new_grp["hooks"] = kept
+            pruned.append(new_grp)
+    pruned.extend(new_groups)
+    hooks_root[event] = pruned
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+print(f"  Updated: {settings_path}")
+PYEOF
     fi
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoderwork/mcp.json
+    # (QoderWork wrapper mode: only reads global mcp.json, won't discover plugin .mcp.json)
     if [[ -f "$plugin_src/.mcp.json" ]]; then
         info "  Configuring MCP for ${plugin_name}..."
         python3 - "${HOME}/.qoderwork/mcp.json" "$plugin_src/.mcp.json" <<'PYEOF'
@@ -408,7 +531,7 @@ with open(path) as f:
     config = json.load(f)
 
 servers = config.get("mcpServers", {})
-to_remove = [k for k in servers if marketplace in k or k.startswith("alibabacloud")]
+to_remove = [k for k in servers if marketplace in k]
 changed = False
 for k in to_remove:
     del servers[k]

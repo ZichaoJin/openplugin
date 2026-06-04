@@ -1,6 +1,6 @@
 {
   "name": "openplugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Install AI coding agent plugins from GitHub — supports Claude Code, Codex, QoderWork",
   "bin": {
     "openplugin": "./bin/cli.js"
@@ -21,6 +21,10 @@
   ],
   "author": "Alibaba Cloud",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZichaoJin/openplugin"
+  },
   "engines": {
     "node": ">=16"
   }

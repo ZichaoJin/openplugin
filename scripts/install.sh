@@ -92,17 +92,32 @@ clone_repo() {
         fi
     fi
 
-    # Clone into CLONE_DIR if provided, otherwise create a temp dir
+    # Download into CLONE_DIR if provided, otherwise create a temp dir
     local target="${CLONE_DIR:-}"
     if [[ -z "$target" ]]; then
         TMPDIR_CREATED="$(mktemp -d)"
         target="$TMPDIR_CREATED"
     fi
 
-    info "Cloning ${REPO_URL} ..." >&2
-    git clone --depth 1 --quiet "$REPO_URL" "$target/repo"
-    REPO_DIR="$target/repo"
-    ok "Cloned to ${REPO_DIR}" >&2
+    # Convert git URL to GitHub tarball URL for faster download
+    local tarball_url=""
+    local repo_https="${REPO_URL%.git}"
+    if [[ "$repo_https" == https://github.com/* ]]; then
+        tarball_url="${repo_https}/archive/refs/heads/main.tar.gz"
+    fi
+
+    if [[ -n "$tarball_url" ]] && command -v curl >/dev/null 2>&1; then
+        info "Downloading ${repo_https} ..." >&2
+        mkdir -p "$target/repo"
+        curl -sL "$tarball_url" | tar xz --strip-components=1 -C "$target/repo"
+        REPO_DIR="$target/repo"
+        ok "Downloaded to ${REPO_DIR}" >&2
+    else
+        info "Cloning ${REPO_URL} ..." >&2
+        git clone --depth 1 --quiet "$REPO_URL" "$target/repo"
+        REPO_DIR="$target/repo"
+        ok "Cloned to ${REPO_DIR}" >&2
+    fi
 }
 
 cleanup_tmp() {

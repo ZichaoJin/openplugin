@@ -64,6 +64,13 @@ REPO_DIR=""
 TMPDIR_CREATED=""
 
 clone_repo() {
+    # If caller already cloned for us, reuse it
+    if [[ -n "${CLONE_DIR:-}" && -d "$CLONE_DIR/repo/plugins" ]]; then
+        REPO_DIR="$CLONE_DIR/repo"
+        info "Using cached clone: ${REPO_DIR}" >&2
+        return
+    fi
+
     # Dev mode: if this script is inside the repo, use local files
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,11 +92,17 @@ clone_repo() {
         fi
     fi
 
+    # Clone into CLONE_DIR if provided, otherwise create a temp dir
+    local target="${CLONE_DIR:-}"
+    if [[ -z "$target" ]]; then
+        TMPDIR_CREATED="$(mktemp -d)"
+        target="$TMPDIR_CREATED"
+    fi
+
     info "Cloning ${REPO_URL} ..." >&2
-    TMPDIR_CREATED="$(mktemp -d)"
-    git clone --depth 1 --quiet "$REPO_URL" "$TMPDIR_CREATED/repo"
-    REPO_DIR="$TMPDIR_CREATED/repo"
-    ok "Downloaded to ${TMPDIR_CREATED}/repo" >&2
+    git clone --depth 1 --quiet "$REPO_URL" "$target/repo"
+    REPO_DIR="$target/repo"
+    ok "Cloned to ${REPO_DIR}" >&2
 }
 
 cleanup_tmp() {

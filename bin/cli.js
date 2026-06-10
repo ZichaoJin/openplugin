@@ -260,17 +260,28 @@ async function main() {
 
   // ─── Install flow ────────────────────────────────────────────────
 
+  // Create a shared temp dir so discover + install reuse the same clone
+  const cloneDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-"));
+  const cleanup = () => {
+    try { fs.rmSync(cloneDir, { recursive: true, force: true }); } catch {}
+  };
+  process.on("exit", cleanup);
+  process.on("SIGINT", () => { cleanup(); process.exit(130); });
+
+  const sharedEnv = { ...env, CLONE_DIR: cloneDir };
+
   // Phase 1: discover plugins
   let discovered;
   try {
     const out = execFileSync("bash", [SCRIPT, "discover"], {
-      env,
+      env: sharedEnv,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "inherit"],
     });
     discovered = JSON.parse(out.trim());
   } catch (e) {
     console.error("Failed to discover plugins from repository.");
+    cleanup();
     process.exit(1);
   }
 
@@ -348,12 +359,12 @@ async function main() {
     process.exit(1);
   }
 
-  // Phase 4: run install
+  // Phase 4: run install (reuses the clone from Phase 1)
   try {
     execFileSync("bash", [SCRIPT, "install"], {
       stdio: "inherit",
       env: {
-        ...env,
+        ...sharedEnv,
         PLUGIN_FILTER: selectedPlugins.map((p) => p.name).join(","),
         WANT_CLAUDE: String(wantClaude),
         WANT_CODEX: String(wantCodex),

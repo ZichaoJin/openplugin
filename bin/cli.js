@@ -158,6 +158,100 @@ function checkbox(title, items) {
   });
 }
 
+// ─── TUI confirm prompt (Y/n) ───────────────────────────────────────
+function confirm(question, defaultYes = true) {
+  return new Promise((resolve) => {
+    const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+    if (!isTTY) {
+      resolve(defaultYes);
+      return;
+    }
+
+    const BLUE = "\x1b[34m";
+    const DIM = "\x1b[2m";
+    const RESET = "\x1b[0m";
+    const hint = defaultYes ? "Y/n" : "y/N";
+
+    process.stdout.write(`${BLUE}?${RESET} ${question} ${DIM}(${hint})${RESET} `);
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+
+    function onKey(key) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener("data", onKey);
+
+      if (key === "\x03") {
+        process.stdout.write("\n");
+        process.exit(130);
+      }
+      if (key === "\r" || key === "\n") {
+        process.stdout.write(defaultYes ? "Yes\n" : "No\n");
+        resolve(defaultYes);
+        return;
+      }
+      if (key.toLowerCase() === "y") {
+        process.stdout.write("Yes\n");
+        resolve(true);
+        return;
+      }
+      if (key.toLowerCase() === "n") {
+        process.stdout.write("No\n");
+        resolve(false);
+        return;
+      }
+      process.stdout.write(defaultYes ? "Yes\n" : "No\n");
+      resolve(defaultYes);
+    }
+
+    process.stdin.on("data", onKey);
+  });
+}
+
+// ─── Alibaba Cloud plugin detection ────────────────────────────────
+function isAlibabacloudPlugin(pluginName, cloneDir) {
+  if (!pluginName.startsWith("alibabacloud")) return false;
+  const hooksDir = path.join(cloneDir, "repo", "plugins", pluginName, "hooks");
+  try {
+    const files = fs.readdirSync(hooksDir);
+    return files.some((f) => f.endsWith(".json"));
+  } catch {
+    return false;
+  }
+}
+
+function showTelemetryNotice(alibabacloudNames) {
+  const CYAN = "\x1b[36m";
+  const BOLD = "\x1b[1m";
+  const YELLOW = "\x1b[33m";
+  const R = "\x1b[0m";
+
+  console.log();
+  console.log(`${CYAN}┌──────────────────────────────────────────────────────────────────────${R}`);
+  console.log(`${CYAN}│${R} ${BOLD}Alibaba Cloud Telemetry Notice${R}`);
+  console.log(`${CYAN}│${R}`);
+  console.log(`${CYAN}│${R} Detected Alibaba Cloud plugin(s): ${BOLD}${alibabacloudNames.join(", ")}${R}`);
+  console.log(`${CYAN}│${R}`);
+  console.log(`${CYAN}│${R} The following opt-in fields are collected to improve Alibaba Cloud`);
+  console.log(`${CYAN}│${R} tool quality. They require ${BOLD}explicit user authorization${R}:`);
+  console.log(`${CYAN}│${R}`);
+  console.log(`${CYAN}│${R}   cliCommand          Sanitized aliyun CLI / MCP tool input`);
+  console.log(`${CYAN}│${R}                       (credentials stripped, cap 2000-4000 chars)`);
+  console.log(`${CYAN}│${R}   errorMessage        API error class/code only (e.g. NoPermission)`);
+  console.log(`${CYAN}│${R}   inputUncachedTokens LLM uncached input tokens`);
+  console.log(`${CYAN}│${R}   inputCachedTokens   LLM cached input tokens`);
+  console.log(`${CYAN}│${R}   inputCreationTokens LLM cache creation tokens`);
+  console.log(`${CYAN}│${R}   outputTokens        LLM output tokens`);
+  console.log(`${CYAN}│${R}   reasoningTokens     LLM reasoning tokens`);
+  console.log(`${CYAN}│${R}`);
+  console.log(`${CYAN}│${R} ${BOLD}Privacy:${R} All AccessKey, STS tokens, JWT, passwords, and PII are`);
+  console.log(`${CYAN}│${R} stripped before transmission. No prompt text or tool responses sent.`);
+  console.log(`${CYAN}└──────────────────────────────────────────────────────────────────────${R}`);
+  console.log();
+}
+
 // ─── Main ────────────────────────────────────────────────────────────
 async function main() {
   const args = process.argv.slice(2);
@@ -359,6 +453,24 @@ async function main() {
     process.exit(1);
   }
 
+  // Phase 3.5: Alibaba Cloud telemetry consent
+  let telemetryOptin = "";
+  const alibabacloudNames = selectedPlugins
+    .map((p) => p.name)
+    .filter((name) => isAlibabacloudPlugin(name, cloneDir));
+
+  if (alibabacloudNames.length > 0) {
+    showTelemetryNotice(alibabacloudNames);
+    if (skipPrompts) {
+      telemetryOptin = "true";
+    } else {
+      const authorized = await confirm(
+        "Authorize collection of the above fields?"
+      );
+      telemetryOptin = authorized ? "true" : "false";
+    }
+  }
+
   // Phase 4: run install (reuses the clone from Phase 1)
   try {
     execFileSync("bash", [SCRIPT, "install"], {
@@ -369,6 +481,7 @@ async function main() {
         WANT_CLAUDE: String(wantClaude),
         WANT_CODEX: String(wantCodex),
         WANT_QODERWORK: String(wantQoderwork),
+        TELEMETRY_OPTIN: telemetryOptin,
       },
     });
   } catch (e) {

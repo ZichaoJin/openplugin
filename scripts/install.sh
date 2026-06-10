@@ -703,56 +703,30 @@ PYEOF
 }
 
 # ─────────────────────────────────────────────────────────────────────
-#  ALIBABA CLOUD TELEMETRY NOTICE
+#  TELEMETRY OPT-IN FILE MANAGEMENT
 # ─────────────────────────────────────────────────────────────────────
 
-CYAN='\033[0;36m'; BOLD='\033[1m'
+OPTIN_FILE="${HOME}/.config/alibabacloud/telemetry-optin"
 
-is_alibabacloud_plugin() {
-    local plugin_name="$1" plugin_src="$2"
-    [[ "$plugin_name" == alibabacloud* ]] || return 1
-    ls "$plugin_src"/hooks/*.json >/dev/null 2>&1 || return 1
-    return 0
+manage_telemetry_optin() {
+    local optin="${TELEMETRY_OPTIN:-}"
+    [[ -n "$optin" ]] || return 0
+
+    if [[ "$optin" == "true" ]]; then
+        mkdir -p "$(dirname "$OPTIN_FILE")"
+        touch "$OPTIN_FILE"
+        ok "Telemetry opt-in authorized. Marker: ${OPTIN_FILE}"
+    else
+        rm -f "$OPTIN_FILE"
+        info "Telemetry opt-in declined. Opt-in fields will not be collected."
+    fi
 }
 
-show_alibabacloud_telemetry_notice() {
-    local repo_dir="$1"
-    shift
-    local plugin_names=("$@")
-
-    local alibabacloud_plugins=()
-    for plugin_name in "${plugin_names[@]}"; do
-        if is_alibabacloud_plugin "$plugin_name" "$repo_dir/plugins/$plugin_name"; then
-            alibabacloud_plugins+=("$plugin_name")
-        fi
-    done
-
-    [[ ${#alibabacloud_plugins[@]} -gt 0 ]] || return 0
-
-    echo ""
-    echo -e "${CYAN}┌──────────────────────────────────────────────────────────────────────${NC}"
-    echo -e "${CYAN}│${NC} ${BOLD}Alibaba Cloud Telemetry Notice${NC}"
-    echo -e "${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} Detected Alibaba Cloud plugin(s): ${BOLD}${alibabacloud_plugins[*]}${NC}"
-    echo -e "${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} The following opt-in fields are collected to improve Alibaba Cloud"
-    echo -e "${CYAN}│${NC} tool quality. They require ${BOLD}explicit user authorization${NC}:"
-    echo -e "${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC}   cliCommand          Sanitized aliyun CLI / MCP tool input"
-    echo -e "${CYAN}│${NC}                       (credentials stripped, cap 2000-4000 chars)"
-    echo -e "${CYAN}│${NC}   errorMessage        API error class/code only (e.g. NoPermission)"
-    echo -e "${CYAN}│${NC}   inputUncachedTokens LLM uncached input tokens"
-    echo -e "${CYAN}│${NC}   inputCachedTokens   LLM cached input tokens"
-    echo -e "${CYAN}│${NC}   inputCreationTokens LLM cache creation tokens"
-    echo -e "${CYAN}│${NC}   outputTokens        LLM output tokens"
-    echo -e "${CYAN}│${NC}   reasoningTokens     LLM reasoning tokens"
-    echo -e "${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} ${BOLD}Privacy:${NC} All AccessKey, STS tokens, JWT, passwords, and PII are"
-    echo -e "${CYAN}│${NC} stripped before transmission. No prompt text or tool responses sent."
-    echo -e "${CYAN}│${NC}"
-    echo -e "${CYAN}│${NC} To disable all remote telemetry:"
-    echo -e "${CYAN}│${NC}   ${YELLOW}export ALIBABACLOUD_TELEMETRY=false${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────────────────────────────────${NC}"
+remove_telemetry_optin() {
+    if [[ -f "$OPTIN_FILE" ]]; then
+        rm -f "$OPTIN_FILE"
+        ok "Removed telemetry opt-in marker: ${OPTIN_FILE}"
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -814,8 +788,8 @@ case "$COMMAND" in
             [[ "$WANT_QODERWORK" == "true" ]] && install_plugin_to_qoderwork "$plugin_name" "$local_src"
         done
 
-        # Show Alibaba Cloud telemetry notice if applicable
-        show_alibabacloud_telemetry_notice "$REPO_DIR" "${PLUGIN_NAMES[@]}"
+        # Manage telemetry opt-in file based on user consent
+        manage_telemetry_optin
 
         banner "Done"
         ok "Installation complete. Restart your coding agent to activate."
@@ -827,6 +801,9 @@ case "$COMMAND" in
         [[ "$WANT_CLAUDE" == "true" ]]    && uninstall_claude
         [[ "$WANT_CODEX" == "true" ]]     && uninstall_codex
         [[ "$WANT_QODERWORK" == "true" ]] && uninstall_qoderwork
+
+        # Clean up telemetry opt-in marker
+        remove_telemetry_optin
 
         banner "Done"
         ok "Uninstallation complete."

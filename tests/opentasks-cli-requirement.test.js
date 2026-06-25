@@ -32,6 +32,7 @@ const {
   installCompanionPlugin,
   parseRepoArg,
   requireOpenTasksCliIfSelected,
+  resolveOpenTasksCommand,
   selectedRequiresClientInstall,
   startAgentNotchAfterInstall,
   validateOpenTasksWorkspaceTarget,
@@ -92,6 +93,27 @@ function testDefaultOpenTasksWorkspaceLivesInCurrentDirectory() {
     defaultOpenTasksWorkspace({ cwd: "/Users/example/projects/ai" }),
     path.join("/Users/example/projects/ai", "opentasks-workspace")
   );
+}
+
+function testResolveOpenTasksCommandCanPreferManagedInstall() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-path-"));
+  const managed = path.join(tmpDir, ".local", "bin", "opentasks");
+  const pathBin = path.join(tmpDir, "bin");
+
+  try {
+    fs.mkdirSync(path.dirname(managed), { recursive: true });
+    fs.mkdirSync(pathBin, { recursive: true });
+    fs.writeFileSync(managed, "#!/usr/bin/env sh\nexit 0\n", "utf8");
+    fs.writeFileSync(path.join(pathBin, "opentasks"), "#!/usr/bin/env sh\nexit 0\n", "utf8");
+    fs.chmodSync(managed, 0o755);
+    fs.chmodSync(path.join(pathBin, "opentasks"), 0o755);
+
+    withEnv({ HOME: tmpDir, PATH: pathBin, OPENTASKS_BIN: undefined }, () => {
+      assert.strictEqual(resolveOpenTasksCommand({ preferManagedInstall: true }), managed);
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
 
 function testRejectsSourceRepoAsOpenTasksWorkspaceTarget() {
@@ -160,7 +182,10 @@ async function testConfigureOpenTasksBossModeInitializesCompanyRoot() {
     assert.strictEqual(result.mode, "opencompany-boss");
     assert.strictEqual(result.companyRoot, companyRoot);
     assert.strictEqual(result.workspace, path.join(companyRoot, "Boss"));
-    assert.deepStrictEqual(calls, [["opentasks", ["company", "setup-boss", "--path", companyRoot]]]);
+    assert.deepStrictEqual(calls, [
+      ["opentasks", ["company", "--help"]],
+      ["opentasks", ["company", "setup-boss", "--path", companyRoot]],
+    ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -192,7 +217,10 @@ async function testConfigureOpenTasksModeUsesSingleSelectPrompt() {
       "OpenTasks setup mode",
       ["single", "opencompany-boss", "opencompany-worker"],
     ]]);
-    assert.deepStrictEqual(calls, [["opentasks", ["company", "setup-boss", "--path", companyRoot]]]);
+    assert.deepStrictEqual(calls, [
+      ["opentasks", ["company", "--help"]],
+      ["opentasks", ["company", "setup-boss", "--path", companyRoot]],
+    ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -220,6 +248,9 @@ async function testConfigureOpenTasksWorkerModeInitializesWorkerWorkspace() {
     assert.strictEqual(result.companyRoot, companyRoot);
     assert.strictEqual(result.workspace, workerWorkspace);
     assert.deepStrictEqual(calls, [[
+      "opentasks",
+      ["worker", "--help"],
+    ], [
       "opentasks",
       [
         "worker",
@@ -1317,6 +1348,7 @@ function testUnmanagedOpenTasksNamedRepoDoesNotAddCompanions() {
 (async () => {
   testExplicitOpenTasksBinIsAccepted();
   testDefaultOpenTasksWorkspaceLivesInCurrentDirectory();
+  testResolveOpenTasksCommandCanPreferManagedInstall();
   testRejectsSourceRepoAsOpenTasksWorkspaceTarget();
   testAllowsExistingPlainOpenTasksWorkspaceTarget();
   await testConfigureOpenTasksDefaultsToSingleWorkspace();

@@ -1196,13 +1196,18 @@ function isAgentNotchVibeProcess(comm, args) {
   );
 }
 
-function resolveOpenTasksCommand() {
+function resolveOpenTasksCommand(options = {}) {
   if (process.env.OPENTASKS_BIN) {
     const explicit = path.resolve(expandHome(process.env.OPENTASKS_BIN));
     if (!isExecutable(explicit)) {
       throw new Error(`OPENTASKS_BIN is not executable: ${process.env.OPENTASKS_BIN}`);
     }
     return explicit;
+  }
+  if (options.preferManagedInstall) {
+    for (const candidate of openTasksBinaryCandidates()) {
+      if (isExecutable(candidate)) return candidate;
+    }
   }
   if (commandExists("opentasks")) {
     return "opentasks";
@@ -1211,6 +1216,17 @@ function resolveOpenTasksCommand() {
     if (isExecutable(candidate)) return candidate;
   }
   return null;
+}
+
+function assertOpenTasksCommandSupports(command, subcommand, execFileSyncImpl = execFileSync) {
+  try {
+    execFileSyncImpl(command, [subcommand, "--help"], { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      `Installed opentasks CLI does not support '${subcommand}'. ` +
+      `Upgrade it with: uv tool install --force ${OPENTASKS_GIT_INSTALL_SPEC}`
+    );
+  }
 }
 
 function openTasksBinaryCandidates() {
@@ -1280,7 +1296,7 @@ async function ensureOpenTasksCliIfSelected(selectedPlugins, options = {}) {
     );
   }
 
-  command = resolveCommandImpl();
+  command = resolveCommandImpl({ preferManagedInstall: true });
   if (command) return command;
   throw new Error(
     "Installed opentasks CLI, but openplugin could not find the executable. " +
@@ -1369,11 +1385,13 @@ async function configureOpenTasksIfSelected(selectedPlugins, skipPrompts, openta
   const companyRoot = path.resolve(expandHome(companyRootInput));
 
   if (mode === "opencompany-boss") {
+    assertOpenTasksCommandSupports(command, "company", execFileSyncImpl);
     fs.mkdirSync(companyRoot, { recursive: true });
     execFileSyncImpl(command, ["company", "setup-boss", "--path", companyRoot], { stdio: "inherit" });
     return { mode, workspace: path.join(companyRoot, "Boss"), companyRoot, addedRepos, failedRepos };
   }
 
+  assertOpenTasksCommandSupports(command, "worker", execFileSyncImpl);
   const aoneName = env.OPENTASKS_AONE_NAME ||
     await inputImpl("Worker Aone name", "", { defaultLabel: "required" });
   if (!aoneName) {

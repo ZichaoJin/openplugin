@@ -117,7 +117,7 @@ When the selected plugin set includes `opentasks`, openplugin also ensures the
 not found, it installs the CLI with:
 
 ```bash
-uv tool install git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git
+uv tool install git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git@test
 ```
 
 After plugin installation, it asks for an OpenTasks setup mode:

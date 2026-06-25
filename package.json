@@ -1,6 +1,6 @@
 {
   "name": "openplugin",
-  "version": "1.0.48",
+  "version": "1.0.49",
   "description": "Install AI coding agent plugins from Git repositories — supports Claude Code, Codex, QoderWork",
   "scripts": {
     "test": "bash tests/mcp-preflight.test.sh && node tests/opentasks-cli-requirement.test.js"

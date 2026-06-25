@@ -8,7 +8,7 @@ const os = require("os");
 const net = require("net");
 
 const SCRIPT = path.join(__dirname, "..", "scripts", "install.sh");
-const OPENTASKS_GIT_INSTALL_SPEC = "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git";
+const OPENTASKS_GIT_INSTALL_SPEC = "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git@test";
 const OPENTASKS_REPO_ID = "gitlab.alibaba-inc.com/subo.jzc/opentasks";
 const OPENPLUGIN_COMPANIONS_FILE = ".openplugin-companions.json";
 
@@ -360,6 +360,85 @@ function checkbox(title, items) {
       process.stdin.setRawMode(false);
       process.stdin.pause();
       process.stdin.removeListener("data", onKey);
+    }
+
+    process.stdin.on("data", onKey);
+  });
+}
+
+function selectOne(title, items) {
+  return new Promise((resolve) => {
+    let cursor = Math.max(0, items.findIndex((item) => item.defaultSelected));
+
+    const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+    if (!isTTY) {
+      resolve(items[cursor].value);
+      return;
+    }
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+
+    const BLUE = "\x1b[34m";
+    const GREEN = "\x1b[32m";
+    const DIM = "\x1b[2m";
+    const RESET = "\x1b[0m";
+    const HIDE = "\x1b[?25l";
+    const SHOW = "\x1b[?25h";
+
+    function render() {
+      process.stdout.write(`\x1b[${items.length + 2}A`);
+      process.stdout.write("\x1b[J");
+      draw();
+    }
+
+    function draw() {
+      const cols = process.stdout.columns || 80;
+      process.stdout.write(
+        fitToWidth(`${BLUE}?${RESET} ${title} ${DIM}(↑/↓=move, enter=confirm)${RESET}`, cols) + "\n"
+      );
+      for (let i = 0; i < items.length; i++) {
+        const pointer = i === cursor ? `${BLUE}❯${RESET}` : " ";
+        const marker = i === cursor ? `${GREEN}◉${RESET}` : `${DIM}○${RESET}`;
+        const desc = items[i].description
+          ? ` ${DIM}— ${items[i].description}${RESET}`
+          : "";
+        process.stdout.write(fitToWidth(`  ${pointer} ${marker} ${items[i].label}${desc}`, cols) + "\n");
+      }
+      process.stdout.write("\n");
+    }
+
+    process.stdout.write(HIDE);
+    draw();
+
+    function onKey(key) {
+      if (key === "\x03") {
+        cleanup();
+        process.stdout.write(SHOW);
+        process.exit(130);
+      }
+      if (key === "\r") {
+        const value = items[cursor].value;
+        cleanup();
+        process.stdout.write(SHOW);
+        resolve(value);
+        return;
+      }
+      if (key === "\x1b[A" || key === "k") {
+        cursor = (cursor - 1 + items.length) % items.length;
+        render();
+      } else if (key === "\x1b[B" || key === "j") {
+        cursor = (cursor + 1) % items.length;
+        render();
+      }
+    }
+
+    function cleanup() {
+      process.stdin.off("data", onKey);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdout.write(`\x1b[${items.length + 2}A`);
+      process.stdout.write("\x1b[J");
     }
 
     process.stdin.on("data", onKey);
@@ -1215,6 +1294,7 @@ async function configureOpenTasksIfSelected(selectedPlugins, skipPrompts, openta
   const cwd = options.cwd || process.cwd();
   const env = options.env || process.env;
   const inputImpl = options.inputImpl || input;
+  const selectImpl = options.selectImpl || selectOne;
   const checkboxImpl = options.checkboxImpl || checkbox;
   const execFileSyncImpl = options.execFileSyncImpl || execFileSync;
 
@@ -1223,7 +1303,24 @@ async function configureOpenTasksIfSelected(selectedPlugins, skipPrompts, openta
   }
   const mode = env.OPENTASKS_SETUP_MODE
     ? normalizeOpenTasksSetupMode(env.OPENTASKS_SETUP_MODE)
-    : normalizeOpenTasksSetupMode(skipPrompts ? "single" : await inputImpl("OpenTasks setup mode [single|boss|worker]", "single", { defaultLabel: "single" }));
+    : normalizeOpenTasksSetupMode(skipPrompts ? "single" : await selectImpl("OpenTasks setup mode", [
+      {
+        label: "Single workspace",
+        value: "single",
+        description: "Use one normal OpenTasks workspace",
+        defaultSelected: true,
+      },
+      {
+        label: "OpenCompany Boss",
+        value: "opencompany-boss",
+        description: "Create or configure the Boss workspace",
+      },
+      {
+        label: "OpenCompany Worker",
+        value: "opencompany-worker",
+        description: "Create or configure this machine as a worker",
+      },
+    ]));
 
   const defaultWorkspace = defaultOpenTasksWorkspace({ cwd });
 

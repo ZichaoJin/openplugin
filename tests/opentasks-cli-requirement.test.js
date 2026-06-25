@@ -166,6 +166,38 @@ async function testConfigureOpenTasksBossModeInitializesCompanyRoot() {
   }
 }
 
+async function testConfigureOpenTasksModeUsesSingleSelectPrompt() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-select-"));
+  const companyRoot = path.join(tmpDir, "opencompany");
+  const calls = [];
+  const prompts = [];
+
+  try {
+    const result = await configureOpenTasksIfSelected([{ name: "opentasks" }], false, "opentasks", {
+      cwd: tmpDir,
+      inputImpl: async (question, defaultValue) => {
+        if (question === "OpenCompany root folder") return companyRoot;
+        throw new Error(`unexpected text input: ${question}:${defaultValue}`);
+      },
+      selectImpl: async (question, items) => {
+        prompts.push([question, items.map((item) => item.value)]);
+        return "opencompany-boss";
+      },
+      execFileSyncImpl: (cmd, args) => calls.push([cmd, args]),
+      checkboxImpl: async () => [],
+    });
+
+    assert.strictEqual(result.mode, "opencompany-boss");
+    assert.deepStrictEqual(prompts, [[
+      "OpenTasks setup mode",
+      ["single", "opencompany-boss", "opencompany-worker"],
+    ]]);
+    assert.deepStrictEqual(calls, [["opentasks", ["company", "setup-boss", "--path", companyRoot]]]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 async function testConfigureOpenTasksWorkerModeInitializesWorkerWorkspace() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-worker-"));
   const companyRoot = path.join(tmpDir, "opencompany");
@@ -291,7 +323,7 @@ async function testExistingCliStillUpgradesWhenOpenTasksSelected() {
     assert.strictEqual(command, "opentasks");
   });
 
-  assert.deepStrictEqual(calls, [["uv", ["tool", "install", "--force", "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git"]]]);
+  assert.deepStrictEqual(calls, [["uv", ["tool", "install", "--force", "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git@test"]]]);
 }
 
 async function testMissingCliFallsBackToGitInstallWhenLocalRepoUnavailable() {
@@ -314,7 +346,7 @@ async function testMissingCliFallsBackToGitInstallWhenLocalRepoUnavailable() {
     assert.strictEqual(command, "opentasks");
   });
 
-  assert.deepStrictEqual(calls, [["uv", ["tool", "install", "--force", "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git"]]]);
+  assert.deepStrictEqual(calls, [["uv", ["tool", "install", "--force", "git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git@test"]]]);
 }
 
 async function testMissingCliInstallCanBeDeclined() {
@@ -1289,6 +1321,7 @@ function testUnmanagedOpenTasksNamedRepoDoesNotAddCompanions() {
   testAllowsExistingPlainOpenTasksWorkspaceTarget();
   await testConfigureOpenTasksDefaultsToSingleWorkspace();
   await testConfigureOpenTasksBossModeInitializesCompanyRoot();
+  await testConfigureOpenTasksModeUsesSingleSelectPrompt();
   await testConfigureOpenTasksWorkerModeInitializesWorkerWorkspace();
   testGitLabHttpOpenTasksRepoArgIsPreserved();
   testGitLabSshOpenTasksRepoArgIsParsed();

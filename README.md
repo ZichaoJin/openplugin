@@ -120,10 +120,33 @@ not found, it installs the CLI with:
 uv tool install git+http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git
 ```
 
-After plugin installation, it asks for an OpenTasks workspace. This workspace
-stores tasks, memories, `repo-index.md`, and `repo-map.md`; source repositories
-can stay anywhere. It then offers a repository picker for the current git repo
-and nearby sibling git repos.
+After plugin installation, it asks for an OpenTasks setup mode:
+
+- `single`: initialize one normal OpenTasks workspace with
+  `opentasks workspace setup --path <workspace>`. This workspace stores tasks,
+  memories, `repo-index.md`, and `repo-map.md`; source repositories can stay
+  anywhere. It then offers a repository picker for the current git repo and
+  nearby sibling git repos.
+- `boss`: initialize an OpenCompany root with
+  `opentasks company setup-boss --path <opencompany-root>`. This creates the
+  `Boss/` workspace and `company.json`.
+- `worker`: initialize an OpenCompany worker with
+  `opentasks worker setup-machine --cwd <opencompany-root>/Workers/<aone-name>`.
+  This creates or reuses the worker workspace and configures the local machine
+  for that worker.
+
+For non-interactive installs, `--yes` keeps the previous default and uses
+`single`. You can choose OpenCompany non-interactively with environment
+variables:
+
+```bash
+OPENTASKS_SETUP_MODE=boss OPENTASKS_COMPANY_ROOT=/path/to/opencompany \
+  npx -y openplugin@latest http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git --yes
+
+OPENTASKS_SETUP_MODE=worker OPENTASKS_COMPANY_ROOT=/path/to/opencompany \
+OPENTASKS_AONE_NAME=HoneyBabyAgent \
+  npx -y openplugin@latest http://gitlab.alibaba-inc.com/subo.jzc/opentasks.git --yes
+```
 
 You can manage repositories later with natural language in an OpenTasks-enabled
 agent, or with CLI commands:

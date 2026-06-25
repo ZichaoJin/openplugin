@@ -68,6 +68,32 @@ function defaultOpenTasksWorkspace(options = {}) {
   return path.join(path.resolve(cwd), "opentasks-workspace");
 }
 
+function defaultOpenCompanyRoot(options = {}) {
+  const cwd = options.cwd || process.cwd();
+  return path.resolve(cwd);
+}
+
+function normalizeOpenTasksSetupMode(value) {
+  const normalized = String(value || "single").trim().toLowerCase().replace(/\s+/g, "-");
+  if (["single", "workspace", "single-workspace"].includes(normalized)) return "single";
+  if (["boss", "opencompany-boss"].includes(normalized)) return "opencompany-boss";
+  if (["worker", "opencompany-worker"].includes(normalized)) return "opencompany-worker";
+  throw new Error(`Unknown OpenTasks setup mode: ${value}. Use single, boss, or worker.`);
+}
+
+function deriveWorkerId(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || !/^[\x00-\x7F]+$/.test(raw)) return "";
+  return raw.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function validateWorkerId(workerId) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(workerId)) {
+    throw new Error("OpenCompany worker id must use lowercase ASCII letters, numbers, and hyphens.");
+  }
+  return workerId;
+}
+
 function validateOpenTasksWorkspaceTarget(workspace) {
   if (!fs.existsSync(workspace)) return workspace;
   const sourceMarkers = [
@@ -1183,52 +1209,112 @@ async function ensureOpenTasksCliIfSelected(selectedPlugins, options = {}) {
   );
 }
 
-async function configureOpenTasksIfSelected(selectedPlugins, skipPrompts, opentasksCommand = null) {
+async function configureOpenTasksIfSelected(selectedPlugins, skipPrompts, opentasksCommand = null, options = {}) {
   if (!selectedIncludesOpenTasks(selectedPlugins)) return null;
   const command = opentasksCommand || await ensureOpenTasksCliIfSelected(selectedPlugins, { skipPrompts });
+  const cwd = options.cwd || process.cwd();
+  const env = options.env || process.env;
+  const inputImpl = options.inputImpl || input;
+  const checkboxImpl = options.checkboxImpl || checkbox;
+  const execFileSyncImpl = options.execFileSyncImpl || execFileSync;
 
-  const defaultWorkspace = defaultOpenTasksWorkspace({ cwd: process.cwd() });
   if (!skipPrompts && process.stdin.isTTY && process.stdout.isTTY) {
-    console.log("OpenTasks workspace stores tasks, memories, repo-index, and repo-map. Source repos can stay anywhere.");
+    console.log("OpenTasks can initialize a single workspace, an OpenCompany Boss, or an OpenCompany Worker.");
   }
-  const workspaceInput = process.env.OPENTASKS_WORKSPACE ||
-    (skipPrompts
-      ? defaultWorkspace
-      : await input("OpenTasks workspace folder", defaultWorkspace, { defaultLabel: defaultWorkspace }));
-  const workspace = path.resolve(expandHome(workspaceInput));
-  validateOpenTasksWorkspaceTarget(workspace);
+  const mode = env.OPENTASKS_SETUP_MODE
+    ? normalizeOpenTasksSetupMode(env.OPENTASKS_SETUP_MODE)
+    : normalizeOpenTasksSetupMode(skipPrompts ? "single" : await inputImpl("OpenTasks setup mode [single|boss|worker]", "single", { defaultLabel: "single" }));
 
-  fs.mkdirSync(workspace, { recursive: true });
-  execFileSync(command, ["workspace", "setup", "--path", workspace], { stdio: "inherit" });
+  const defaultWorkspace = defaultOpenTasksWorkspace({ cwd });
 
   const addedRepos = [];
   const failedRepos = [];
-  if (!skipPrompts) {
-    const repos = discoverManageableRepos(process.cwd());
-    if (repos.length > 0) {
-      const repoItems = repos.map((repo) => ({
-        label: `${repo.kind.padEnd(7)} ${repo.path}`,
-        description: "",
-        defaultSelected: repo.defaultSelected,
-      }));
-      const indices = await checkbox("Which repositories should OpenTasks manage now?", repoItems);
-      for (const index of indices) {
-        const repo = repos[index];
-        try {
-          execFileSync(command, ["repo", "add", repo.path, "--cwd", workspace], { stdio: "inherit" });
-          addedRepos.push(repo.path);
-        } catch {
-          failedRepos.push(repo.path);
+  if (mode === "single") {
+    const workspaceInput = env.OPENTASKS_WORKSPACE ||
+      (skipPrompts
+        ? defaultWorkspace
+        : await inputImpl("OpenTasks workspace folder", defaultWorkspace, { defaultLabel: defaultWorkspace }));
+    const workspace = path.resolve(expandHome(workspaceInput));
+    validateOpenTasksWorkspaceTarget(workspace);
+
+    fs.mkdirSync(workspace, { recursive: true });
+    execFileSyncImpl(command, ["workspace", "setup", "--path", workspace], { stdio: "inherit" });
+
+    if (!skipPrompts) {
+      const repos = discoverManageableRepos(cwd);
+      if (repos.length > 0) {
+        const repoItems = repos.map((repo) => ({
+          label: `${repo.kind.padEnd(7)} ${repo.path}`,
+          description: "",
+          defaultSelected: repo.defaultSelected,
+        }));
+        const indices = await checkboxImpl("Which repositories should OpenTasks manage now?", repoItems);
+        for (const index of indices) {
+          const repo = repos[index];
+          try {
+            execFileSyncImpl(command, ["repo", "add", repo.path, "--cwd", workspace], { stdio: "inherit" });
+            addedRepos.push(repo.path);
+          } catch {
+            failedRepos.push(repo.path);
+          }
         }
       }
     }
+
+    return { mode, workspace, addedRepos, failedRepos };
   }
 
-  return { workspace, addedRepos, failedRepos };
+  const defaultCompanyRoot = defaultOpenCompanyRoot({ cwd });
+  const companyRootInput = env.OPENTASKS_COMPANY_ROOT ||
+    (skipPrompts
+      ? defaultCompanyRoot
+      : await inputImpl("OpenCompany root folder", defaultCompanyRoot, { defaultLabel: defaultCompanyRoot }));
+  const companyRoot = path.resolve(expandHome(companyRootInput));
+
+  if (mode === "opencompany-boss") {
+    fs.mkdirSync(companyRoot, { recursive: true });
+    execFileSyncImpl(command, ["company", "setup-boss", "--path", companyRoot], { stdio: "inherit" });
+    return { mode, workspace: path.join(companyRoot, "Boss"), companyRoot, addedRepos, failedRepos };
+  }
+
+  const aoneName = env.OPENTASKS_AONE_NAME ||
+    await inputImpl("Worker Aone name", "", { defaultLabel: "required" });
+  if (!aoneName) {
+    throw new Error("OpenCompany Worker setup requires a worker Aone name.");
+  }
+  const name = env.OPENTASKS_WORKER_NAME ||
+    (skipPrompts ? aoneName : await inputImpl("Worker display name", aoneName, { defaultLabel: aoneName }));
+  const defaultWorkerId = deriveWorkerId(aoneName);
+  const workerId = validateWorkerId(env.OPENTASKS_WORKER_ID ||
+    (skipPrompts
+      ? defaultWorkerId
+      : await inputImpl("Worker id", defaultWorkerId, { defaultLabel: defaultWorkerId || "required" })));
+  const workerWorkspace = path.join(companyRoot, "Workers", aoneName);
+  const workerArgs = [
+    "worker",
+    "setup-machine",
+    "--cwd",
+    workerWorkspace,
+    "--name",
+    name,
+    "--aone-name",
+    aoneName,
+    "--worker-id",
+    workerId,
+  ];
+  const aoneCommand = env.OPENTASKS_AONE_COMMAND || "";
+  if (aoneCommand) {
+    workerArgs.push("--aone-command", aoneCommand);
+  }
+  execFileSyncImpl(command, workerArgs, { stdio: "inherit" });
+  return { mode, workspace: workerWorkspace, companyRoot, workerWorkspace, addedRepos, failedRepos };
 }
 
 function formatOpenTasksInstallSummary({
+  mode = "single",
   workspace,
+  companyRoot = null,
+  workerWorkspace = null,
   addedRepos = [],
   failedRepos = [],
   agentNotchAutostarts = false,
@@ -1237,9 +1323,16 @@ function formatOpenTasksInstallSummary({
   const lines = [
     "",
     "Welcome to OpenTasks",
+    `  Setup mode: ${mode}`,
     `  Workspace: ${workspace}`,
     "  Workspace role: task and memory hub, not a source repo",
   ];
+  if (companyRoot) {
+    lines.push(`  OpenCompany root: ${companyRoot}`);
+  }
+  if (workerWorkspace) {
+    lines.push(`  Worker workspace: ${workerWorkspace}`);
+  }
 
   if (addedRepos.length > 0) {
     lines.push("  Managed repos:");

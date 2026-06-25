@@ -26,6 +26,7 @@ const {
   formatOpenTasksInstallPlan,
   formatOpenTasksInstallSummary,
   agentNotchAutostartsFromHooks,
+  configureOpenTasksIfSelected,
   defaultAgentNotchVibeSocketPath,
   defaultOpenTasksWorkspace,
   installCompanionPlugin,
@@ -119,6 +120,88 @@ function testAllowsExistingPlainOpenTasksWorkspaceTarget() {
     fs.mkdirSync(path.join(workspace, "info-for-agent"), { recursive: true });
     fs.writeFileSync(path.join(workspace, "info-for-agent", "repo-index.md"), "", "utf8");
     assert.strictEqual(validateOpenTasksWorkspaceTarget(workspace), workspace);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function testConfigureOpenTasksDefaultsToSingleWorkspace() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-config-"));
+  const workspace = path.join(tmpDir, "opentasks-workspace");
+  const calls = [];
+
+  try {
+    const result = await configureOpenTasksIfSelected([{ name: "opentasks" }], true, "opentasks", {
+      cwd: tmpDir,
+      execFileSyncImpl: (cmd, args) => calls.push([cmd, args]),
+    });
+
+    assert.strictEqual(result.mode, "single");
+    assert.strictEqual(result.workspace, workspace);
+    assert.deepStrictEqual(calls, [["opentasks", ["workspace", "setup", "--path", workspace]]]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function testConfigureOpenTasksBossModeInitializesCompanyRoot() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-boss-"));
+  const companyRoot = path.join(tmpDir, "opencompany");
+  const calls = [];
+
+  try {
+    const result = await configureOpenTasksIfSelected([{ name: "opentasks" }], false, "opentasks", {
+      cwd: tmpDir,
+      env: { OPENTASKS_SETUP_MODE: "boss", OPENTASKS_COMPANY_ROOT: companyRoot },
+      execFileSyncImpl: (cmd, args) => calls.push([cmd, args]),
+      checkboxImpl: async () => [],
+    });
+
+    assert.strictEqual(result.mode, "opencompany-boss");
+    assert.strictEqual(result.companyRoot, companyRoot);
+    assert.strictEqual(result.workspace, path.join(companyRoot, "Boss"));
+    assert.deepStrictEqual(calls, [["opentasks", ["company", "setup-boss", "--path", companyRoot]]]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function testConfigureOpenTasksWorkerModeInitializesWorkerWorkspace() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-opentasks-worker-"));
+  const companyRoot = path.join(tmpDir, "opencompany");
+  const calls = [];
+
+  try {
+    const result = await configureOpenTasksIfSelected([{ name: "opentasks" }], false, "opentasks", {
+      cwd: tmpDir,
+      env: {
+        OPENTASKS_SETUP_MODE: "worker",
+        OPENTASKS_COMPANY_ROOT: companyRoot,
+        OPENTASKS_AONE_NAME: "HoneyBabyAgent",
+      },
+      execFileSyncImpl: (cmd, args) => calls.push([cmd, args]),
+      checkboxImpl: async () => [],
+    });
+
+    const workerWorkspace = path.join(companyRoot, "Workers", "HoneyBabyAgent");
+    assert.strictEqual(result.mode, "opencompany-worker");
+    assert.strictEqual(result.companyRoot, companyRoot);
+    assert.strictEqual(result.workspace, workerWorkspace);
+    assert.deepStrictEqual(calls, [[
+      "opentasks",
+      [
+        "worker",
+        "setup-machine",
+        "--cwd",
+        workerWorkspace,
+        "--name",
+        "HoneyBabyAgent",
+        "--aone-name",
+        "HoneyBabyAgent",
+        "--worker-id",
+        "honeybabyagent",
+      ],
+    ]]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1204,6 +1287,9 @@ function testUnmanagedOpenTasksNamedRepoDoesNotAddCompanions() {
   testDefaultOpenTasksWorkspaceLivesInCurrentDirectory();
   testRejectsSourceRepoAsOpenTasksWorkspaceTarget();
   testAllowsExistingPlainOpenTasksWorkspaceTarget();
+  await testConfigureOpenTasksDefaultsToSingleWorkspace();
+  await testConfigureOpenTasksBossModeInitializesCompanyRoot();
+  await testConfigureOpenTasksWorkerModeInitializesWorkerWorkspace();
   testGitLabHttpOpenTasksRepoArgIsPreserved();
   testGitLabSshOpenTasksRepoArgIsParsed();
   await testMissingCliAutoInstallsWhenOpenTasksSelected();

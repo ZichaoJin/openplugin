@@ -577,84 +577,6 @@ PYEOF
     ok "  ${plugin_name} (v${version}) → Codex CLI"
 }
 
-register_qoder_family_plugin() {
-    local client_home="$1" plugin_name="$2" plugin_src="$3" dest="$4"
-
-    local settings="${HOME}/${client_home}/settings.json"
-    local plugins_dir="${HOME}/${client_home}/plugins"
-    mkdir -p "$(dirname "$settings")" "$plugins_dir"
-
-    if [[ ! -f "$settings" ]]; then
-        echo '{}' > "$settings"
-    fi
-
-    python3 - "$settings" "$plugins_dir" "$plugin_name" "$MARKETPLACE_NAME" "$plugin_src" "$dest" <<'PYEOF'
-import datetime
-import json
-import os
-import sys
-
-settings_path, plugins_dir, plugin_name, marketplace, plugin_src, dest = sys.argv[1:]
-plugin_key = f"{plugin_name}@{marketplace}"
-
-def read_json(path, default):
-    if not os.path.isfile(path):
-        return default
-    with open(path) as f:
-        text = f.read().strip()
-    return json.loads(text) if text else default
-
-def write_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-def plugin_version():
-    for rel in (".codex-plugin/plugin.json", ".claude-plugin/plugin.json"):
-        path = os.path.join(plugin_src, rel)
-        if os.path.isfile(path):
-            try:
-                value = json.load(open(path)).get("version")
-                if value:
-                    return value
-            except Exception:
-                pass
-    return "0.0.0"
-
-settings = read_json(settings_path, {})
-enabled = settings.setdefault("enabledPlugins", {})
-if isinstance(enabled, dict):
-    enabled[plugin_key] = True
-write_json(settings_path, settings)
-
-installed_path = os.path.join(plugins_dir, "installed_plugins.json")
-installed = read_json(installed_path, {"plugins": {}})
-installed.setdefault("plugins", {})[plugin_key] = {"installPath": dest}
-write_json(installed_path, installed)
-
-installed_v2_path = os.path.join(plugins_dir, "installed_plugins-v2.json")
-installed_v2 = read_json(installed_v2_path, {"plugins": {}})
-plugins = installed_v2.setdefault("plugins", {})
-existing = plugins.get(plugin_key)
-installed_at = None
-if isinstance(existing, list) and existing and isinstance(existing[0], dict):
-    installed_at = existing[0].get("installedAt")
-now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-plugins[plugin_key] = [{
-    "scope": "user",
-    "installPath": dest,
-    "version": plugin_version(),
-    "source": "marketplace",
-    "installedAt": installed_at or now,
-    "lastUpdated": now,
-}]
-write_json(installed_v2_path, installed_v2)
-
-print(f"  Registered: {plugin_key}")
-PYEOF
-}
-
 install_plugin_to_qoderwork() {
     local plugin_name="$1" plugin_src="$2"
 
@@ -667,25 +589,6 @@ install_plugin_to_qoderwork() {
         --exclude '.DS_Store' \
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
-
-    if [[ -f "$dest/hooks/qoderwork-hooks.json" ]]; then
-        python3 - "$dest/hooks/qoderwork-hooks.json" "$dest/hooks/hooks.json" "$dest" <<'PYEOF'
-import json, sys
-
-src, dst, plugin_root = sys.argv[1:]
-with open(src) as f:
-    template = json.load(f)
-escaped_root = json.dumps(plugin_root)[1:-1]
-template_str = json.dumps(template).replace("__PLUGIN_ROOT__", escaped_root)
-template = json.loads(template_str)
-with open(dst, "w") as f:
-    json.dump(template, f, indent=2)
-    f.write("\n")
-PYEOF
-        rm -f \
-            "$dest/hooks/codex-hooks.json" \
-            "$dest/hooks/qoder-hooks.json"
-    fi
 
     # Built-in QoderWork hook registration (no external script needed)
     local hooks_json="$dest/hooks/qoderwork-hooks.json"
@@ -761,8 +664,6 @@ with open(settings_path, "w") as f:
 print(f"  Updated: {settings_path}")
 PYEOF
     fi
-
-    register_qoder_family_plugin ".qoderwork" "$plugin_name" "$plugin_src" "$dest"
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoderwork/mcp.json
     # (QoderWork wrapper mode: only reads global mcp.json, won't discover plugin .mcp.json)
@@ -840,13 +741,6 @@ install_plugin_to_qoder() {
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
 
-    if [[ -f "$dest/hooks/qoder-hooks.json" ]]; then
-        rm -f \
-            "$dest/hooks/hooks.json" \
-            "$dest/hooks/codex-hooks.json" \
-            "$dest/hooks/qoderwork-hooks.json"
-    fi
-
     # Built-in Qoder hook registration (same hook format as Claude/QoderWork)
     local hooks_json="$dest/hooks/qoder-hooks.json"
     if [[ -f "$hooks_json" ]]; then
@@ -921,8 +815,6 @@ with open(settings_path, "w") as f:
 print(f"  Updated: {settings_path}")
 PYEOF
     fi
-
-    register_qoder_family_plugin ".qoder" "$plugin_name" "$plugin_src" "$dest"
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoder/mcp.json.
     local mcp_keys=""
@@ -1013,7 +905,6 @@ uninstall_claude() {
 
     info "Removing marketplace..."
     claude plugin marketplace remove "${MARKETPLACE_NAME}" 2>/dev/null || true
-    clean_claude_registry
 
     ok "Claude Code: fully removed."
 }
@@ -1064,51 +955,6 @@ PYEOF
     ok "Codex: fully removed."
 }
 
-purge_agent_notch_runtime_if_needed() {
-    [[ "$MARKETPLACE_NAME" == "opennotch" ]] || return 0
-
-    info "Stopping Agent Notch runtime..."
-    pkill -f 'AgentNotchVibe' 2>/dev/null || true
-    pkill -f 'agent-notch-hook|hitl-island-hook|agent-notch-manager' 2>/dev/null || true
-
-    find /tmp -maxdepth 1 \( \
-        -name 'agent-notch-vibe-*.sock' -o \
-        -name 'agent-notch-vibe-*.instance.lock' -o \
-        -name 'agent-notch-vibe-start-*.lock' -o \
-        -name 'agent-notch-vibe-start-*.stamp' \
-    \) -delete 2>/dev/null || true
-}
-
-clean_claude_registry() {
-    local registry="${HOME}/.claude/plugins/installed_plugins.json"
-    [[ -f "$registry" ]] || return 0
-
-    python3 - "$registry" "$MARKETPLACE_NAME" <<'PYEOF'
-import json, sys
-
-path, marketplace = sys.argv[1:]
-with open(path) as f:
-    data = json.load(f)
-
-plugins = data.get("plugins")
-if not isinstance(plugins, dict):
-    sys.exit(0)
-
-changed = False
-for key, value in list(plugins.items()):
-    blob = json.dumps(value, ensure_ascii=False)
-    if f"@{marketplace}" in key or marketplace in key or marketplace in blob:
-        del plugins[key]
-        changed = True
-
-if changed:
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    print(f"Updated: {path}")
-PYEOF
-}
-
 uninstall_qoder_family() {
     local client_label="$1"
     local client_home="$2"
@@ -1120,10 +966,6 @@ uninstall_qoder_family() {
     local removed_any=false
     local plugin_prefixes=()
     local all_mcp_keys=()
-
-    if [[ "$MARKETPLACE_NAME" == "opennotch" ]]; then
-        plugin_prefixes+=("agent-notch/")
-    fi
 
     if [[ -d "$custom_dir" ]]; then
         for plugin_dir in "$custom_dir"/*/; do
@@ -1208,51 +1050,29 @@ except Exception: pass
                 removed_any=true
             fi
         done
-
-        if [[ "$MARKETPLACE_NAME" == "opennotch" && -d "$custom_dir/agent-notch" ]]; then
-            rm -rf "$custom_dir/agent-notch"
-            ok "Removed ${custom_dir}/agent-notch"
-            removed_any=true
-        fi
     fi
 
     if [[ "$removed_any" == "false" ]]; then
         info "No plugins found for ${MARKETPLACE_NAME}."
     fi
 
-    # Remove hooks and enabled plugin entries from settings.json. This still runs
-    # when plugin files are already gone, which is the common broken-reinstall case.
+    # Remove hooks from settings.json
     local settings="${HOME}/${client_home}/settings.json"
     if [[ -f "$settings" && ${#plugin_prefixes[@]} -gt 0 ]]; then
         info "Removing hooks from settings.json..."
         local prefixes_json
         prefixes_json=$(printf '%s\n' "${plugin_prefixes[@]}" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin]))")
-        python3 - "$settings" "$prefixes_json" "$MARKETPLACE_NAME" <<'PYEOF'
+        python3 - "$settings" "$prefixes_json" <<'PYEOF'
 import json, sys
 
-path, prefixes_json, marketplace = sys.argv[1:]
+path, prefixes_json = sys.argv[1:]
 prefixes = json.loads(prefixes_json)
-plugin_names = [p[:-1] if p.endswith("/") else p for p in prefixes]
 
 with open(path) as f:
     settings = json.load(f)
 
-enabled = settings.get("enabledPlugins")
-if isinstance(enabled, dict):
-    for key in list(enabled):
-        if (
-            marketplace in key
-            or any(key.startswith(f"{plugin_name}@") for plugin_name in plugin_names)
-            or (marketplace == "opennotch" and "agent-notch" in key)
-        ):
-            del enabled[key]
-
 hooks = settings.get("hooks", {})
 if not isinstance(hooks, dict):
-    with open(path, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-    print(f"Updated: {path}")
     sys.exit(0)
 
 changed = False
@@ -1265,35 +1085,9 @@ for event, groups in list(hooks.items()):
             pruned.append(grp)
             continue
         inner = grp.get("hooks") or []
-        def owned(h):
-            if not isinstance(h, dict):
-                return False
-            name = h.get("name")
-            command = h.get("command")
-            name = name if isinstance(name, str) else ""
-            command = command if isinstance(command, str) else ""
-            if any(name.startswith(p) for p in prefixes):
-                return True
-            if marketplace in name or marketplace in command:
-                return True
-            for plugin_name in plugin_names:
-                if (
-                    f"/plugins-custom/{plugin_name}/" in command
-                    or f"{plugin_name}/hooks/scripts/" in command
-                    or name.startswith(f"{plugin_name}/")
-                ):
-                    return True
-            if marketplace == "opennotch" and (
-                "agent-notch" in name
-                or "agent-notch" in command
-                or "hitl-island-hook" in command
-                or "agent-notch-manager" in command
-                or "AGENT_HITL_CLIENT=" in command
-                or "AGENT_HITL_EVENT=" in command
-            ):
-                return True
-            return False
-        kept = [h for h in inner if not owned(h)]
+        kept = [h for h in inner
+                if not (isinstance(h, dict) and isinstance(h.get("name"), str)
+                        and any(h["name"].startswith(p) for p in prefixes))]
         if kept:
             new_grp = dict(grp)
             new_grp["hooks"] = kept
@@ -1315,46 +1109,6 @@ if changed:
     print(f"Updated: {path}")
 else:
     print("No hooks to remove.")
-PYEOF
-    fi
-
-    # Remove Qoder/QoderWork plugin registry entries, including stale records
-    # left behind after plugin files were manually deleted.
-    if [[ ${#plugin_prefixes[@]} -gt 0 ]]; then
-        local plugin_names_json
-        plugin_names_json=$(printf '%s\n' "${plugin_prefixes[@]}" | python3 -c "import sys,json; print(json.dumps([(l.strip()[:-1] if l.strip().endswith('/') else l.strip()) for l in sys.stdin if l.strip()]))")
-        python3 - "${HOME}/${client_home}/plugins" "$plugin_names_json" "$MARKETPLACE_NAME" <<'PYEOF'
-import json, os, sys
-
-plugins_dir, plugin_names_json, marketplace = sys.argv[1:]
-plugin_names = json.loads(plugin_names_json)
-
-for filename in ("installed_plugins.json", "installed_plugins-v2.json"):
-    path = os.path.join(plugins_dir, filename)
-    if not os.path.isfile(path):
-        continue
-    with open(path) as f:
-        data = json.load(f)
-    plugins = data.get("plugins")
-    if not isinstance(plugins, dict):
-        continue
-    changed = False
-    for key, value in list(plugins.items()):
-        blob = json.dumps(value, ensure_ascii=False)
-        if (
-            marketplace in key
-            or marketplace in blob
-            or any(key.startswith(f"{plugin_name}@") for plugin_name in plugin_names)
-            or any(f"plugins-custom/{plugin_name}" in blob for plugin_name in plugin_names)
-            or (marketplace == "opennotch" and ("agent-notch" in key or "agent-notch" in blob))
-        ):
-            del plugins[key]
-            changed = True
-    if changed:
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
-        print(f"Updated: {path}")
 PYEOF
     fi
 
@@ -1506,12 +1260,10 @@ case "$COMMAND" in
     uninstall)
         banner "Uninstalling plugins from ${MARKETPLACE_NAME}"
 
-        purge_agent_notch_runtime_if_needed
         [[ "$WANT_CLAUDE" == "true" ]]    && uninstall_claude
         [[ "$WANT_CODEX" == "true" ]]     && uninstall_codex
         [[ "$WANT_QODER" == "true" ]]     && uninstall_qoder
         [[ "$WANT_QODERWORK" == "true" ]] && uninstall_qoderwork
-        purge_agent_notch_runtime_if_needed
 
         # Clean up telemetry opt-in marker
         remove_telemetry_optin

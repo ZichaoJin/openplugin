@@ -1262,57 +1262,6 @@ async function testAgentNotchInstallRestartsExistingUi() {
   }
 }
 
-async function testAgentNotchStartRetriesWhenSocketDoesNotStayLive() {
-  const calls = [];
-  const terminated = [];
-  const liveChecks = [
-    false,
-    true,
-    false,
-    false,
-    true,
-    true,
-  ];
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-agent-notch-retry-"));
-  try {
-    const runtime = path.join(tmpDir, "runtime");
-    fs.mkdirSync(path.join(runtime, "bin"), { recursive: true });
-    fs.writeFileSync(path.join(runtime, "Package.swift"), "", "utf8");
-    const executable = path.join(runtime, "bin", `AgentNotchVibe-darwin-${process.arch}`);
-    fs.writeFileSync(executable, "#!/usr/bin/env sh\nexit 0\n", "utf8");
-    fs.chmodSync(executable, 0o755);
-
-    const result = await startAgentNotchAfterInstall(
-      [{ name: "agent-notch" }],
-      { wantQoder: true },
-      {
-        homeDir: tmpDir,
-        platform: "darwin",
-        runtimeDir: runtime,
-        socketPath: path.join(tmpDir, "agent-notch.sock"),
-        socketLiveImpl: () => Promise.resolve(liveChecks.shift() ?? true),
-        terminateAgentNotchImpl: () => terminated.push("terminated"),
-        spawnImpl: (cmd, args, options) => {
-          calls.push([cmd, args, options]);
-          return { unref() {} };
-        },
-        startTimeoutMs: 50,
-        stopTimeoutMs: 50,
-        waitIntervalMs: 1,
-        stabilityCheckMs: 1,
-      }
-    );
-
-    assert.strictEqual(result, true);
-    assert.deepStrictEqual(terminated, ["terminated", "terminated"]);
-    assert.strictEqual(calls.length, 2);
-    assert.strictEqual(calls[0][0], executable);
-    assert.strictEqual(calls[1][0], executable);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-}
-
 async function testAgentNotchBuildFailureDoesNotFailInstall() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-agent-notch-build-fail-"));
   const warnings = [];
@@ -1435,7 +1384,6 @@ function testUnmanagedOpenTasksNamedRepoDoesNotAddCompanions() {
   await testAgentNotchStartTimeoutWarnsWithRuntimeDetails();
   await testAgentNotchInstallClearsStaleProcessBeforeStart();
   await testAgentNotchInstallRestartsExistingUi();
-  await testAgentNotchStartRetriesWhenSocketDoesNotStayLive();
   await testAgentNotchBuildFailureDoesNotFailInstall();
   testAgentNotchInstallStartUsesHookSocketPath();
   testNonOpenTasksRepoDoesNotAddCompanions();

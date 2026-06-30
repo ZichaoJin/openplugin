@@ -1047,47 +1047,23 @@ async function startAgentNotchAfterInstall(selectedPlugins, targets = {}, option
   }
 
   const spawnImpl = options.spawnImpl || spawn;
-  const launchAndWait = async () => {
-    const child = spawnImpl(executable, [], {
-      detached: true,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        AGENT_NOTCH_VIBE_SOCKET: socketPath,
-        AGENT_NOTCH_OPEN_ON_LAUNCH: "1",
-      },
-    });
-    if (child && typeof child.on === "function") child.on("error", () => {});
-    if (child && typeof child.unref === "function") child.unref();
+  const child = spawnImpl(executable, [], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      AGENT_NOTCH_VIBE_SOCKET: socketPath,
+      AGENT_NOTCH_OPEN_ON_LAUNCH: "1",
+    },
+  });
+  if (child && typeof child.on === "function") child.on("error", () => {});
+  if (child && typeof child.unref === "function") child.unref();
 
-    const live = await waitForSocketLive(socketPath, {
-      socketLiveImpl,
-      timeoutMs: options.startTimeoutMs ?? 30000,
-      intervalMs: options.waitIntervalMs ?? 100,
-    });
-    if (!live) return false;
-
-    const stabilityMs = options.stabilityCheckMs ?? 1000;
-    if (stabilityMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, stabilityMs));
-      return await socketLiveImpl(socketPath);
-    }
-    return true;
-  };
-
-  let started = await launchAndWait();
-  if (!started) {
-    terminateAgentNotchImpl();
-    await waitForSocketDown(socketPath, {
-      socketLiveImpl,
-      timeoutMs: options.stopTimeoutMs ?? 1500,
-      intervalMs: options.waitIntervalMs ?? 100,
-    });
-    try { fs.rmSync(socketPath, { force: true }); } catch {}
-    try { fs.rmSync(lockPath, { force: true }); } catch {}
-    started = await launchAndWait();
-  }
-
+  const started = await waitForSocketLive(socketPath, {
+    socketLiveImpl,
+    timeoutMs: options.startTimeoutMs ?? 30000,
+    intervalMs: options.waitIntervalMs ?? 100,
+  });
   if (!started) {
     warnImpl(
       `[warn] Agent Notch process was launched but socket did not become ready: ${socketPath}\n` +

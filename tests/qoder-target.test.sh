@@ -134,7 +134,7 @@ run_qoder_uninstall() {
 }
 
 test_qoder_install_uses_qoder_hooks_and_home() {
-    local tmp_dir out_file settings mcp
+    local tmp_dir out_file settings mcp installed installed_v2 root_manifest
     tmp_dir="$(mktemp -d)"
     out_file="$tmp_dir/install.out"
     trap 'rm -rf "$tmp_dir"' RETURN
@@ -146,9 +146,21 @@ test_qoder_install_uses_qoder_hooks_and_home() {
 
     settings="$tmp_dir/home/.qoder/settings.json"
     mcp="$tmp_dir/home/.qoder/mcp.json"
+    root_manifest="$tmp_dir/home/.qoder/plugins-custom/test-plugin/plugin.json"
+    installed="$tmp_dir/home/.qoder/plugins/installed_plugins.json"
+    installed_v2="$tmp_dir/home/.qoder/plugins/installed_plugins-v2.json"
 
     test -f "$settings"
     test -f "$mcp"
+    test -f "$root_manifest"
+    test -f "$installed"
+    test -f "$installed_v2"
+    grep -Fq '"marketplaceName": "test-marketplace"' "$root_manifest"
+    grep -Fq '"defaultEnabled": true' "$root_manifest"
+    grep -Fq '"test-plugin@test-marketplace": true' "$settings"
+    grep -Fq '"test-plugin@test-marketplace"' "$installed"
+    grep -Fq "$tmp_dir/home/.qoder/plugins-custom/test-plugin" "$installed"
+    grep -Fq '"test-plugin@test-marketplace"' "$installed_v2"
     grep -Fq 'AGENT_HITL_CLIENT=qoder' "$settings"
     grep -Fq "$tmp_dir/home/.qoder/plugins-custom/test-plugin" "$settings"
     grep -Fq '"test-server"' "$mcp"
@@ -182,6 +194,11 @@ test_qoder_install_uses_qoder_hooks_and_home() {
     fi
     if grep -Fq '"test-server"' "$mcp"; then
         echo "qoder uninstall must remove qoder mcp entries"
+        cat "$tmp_dir/uninstall.out"
+        return 1
+    fi
+    if grep -Fq '"test-plugin@test-marketplace"' "$settings" "$installed" "$installed_v2"; then
+        echo "qoder uninstall must remove qoder plugin registry entries"
         cat "$tmp_dir/uninstall.out"
         return 1
     fi

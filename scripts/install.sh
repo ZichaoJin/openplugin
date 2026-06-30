@@ -266,6 +266,100 @@ with open(sys.argv[1]) as f:
 PYEOF
 }
 
+ensure_qoder_plugin_registration() {
+    local client_home="$1" plugin_name="$2" dest="$3" plugin_src="$4"
+    local source_manifest=""
+
+    if [[ -f "$plugin_src/plugin.json" ]]; then
+        source_manifest="$plugin_src/plugin.json"
+    elif [[ -f "$plugin_src/.claude-plugin/plugin.json" ]]; then
+        source_manifest="$plugin_src/.claude-plugin/plugin.json"
+    elif [[ -f "$plugin_src/.codex-plugin/plugin.json" ]]; then
+        source_manifest="$plugin_src/.codex-plugin/plugin.json"
+    fi
+
+    if [[ -z "$source_manifest" ]]; then
+        return
+    fi
+
+    python3 - "$client_home" "$plugin_name" "$dest" "$source_manifest" "$MARKETPLACE_NAME" <<'PYEOF'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+client_home, plugin_name, dest, source_manifest, marketplace = sys.argv[1:]
+home = os.path.expanduser("~")
+
+with open(source_manifest) as f:
+    manifest = json.load(f)
+
+manifest.setdefault("name", plugin_name)
+manifest.setdefault("version", "unknown")
+manifest["marketplaceName"] = marketplace
+manifest.setdefault("defaultEnabled", True)
+
+with open(os.path.join(dest, "plugin.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+
+plugin_key = f"{plugin_name}@{marketplace}"
+
+settings_path = os.path.join(home, client_home, "settings.json")
+if os.path.isfile(settings_path):
+    with open(settings_path) as f:
+        settings = json.load(f)
+else:
+    settings = {}
+settings.setdefault("enabledPlugins", {})
+settings["enabledPlugins"][plugin_key] = True
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+
+plugins_dir = os.path.join(home, client_home, "plugins")
+os.makedirs(plugins_dir, exist_ok=True)
+
+installed_path = os.path.join(plugins_dir, "installed_plugins.json")
+if os.path.isfile(installed_path):
+    with open(installed_path) as f:
+        installed = json.load(f)
+else:
+    installed = {}
+installed.setdefault("plugins", {})
+installed["plugins"][plugin_key] = {"installPath": dest}
+with open(installed_path, "w") as f:
+    json.dump(installed, f, indent=2)
+    f.write("\n")
+
+installed_v2_path = os.path.join(plugins_dir, "installed_plugins-v2.json")
+if os.path.isfile(installed_v2_path):
+    with open(installed_v2_path) as f:
+        installed_v2 = json.load(f)
+else:
+    installed_v2 = {}
+installed_v2.setdefault("plugins", {})
+previous = installed_v2["plugins"].get(plugin_key)
+installed_at = ""
+if isinstance(previous, list) and previous and isinstance(previous[0], dict):
+    installed_at = previous[0].get("installedAt", "")
+now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+installed_v2["plugins"][plugin_key] = [{
+    "scope": "user",
+    "installPath": dest,
+    "version": manifest.get("version", "unknown"),
+    "source": "local",
+    "installedAt": installed_at or now,
+    "lastUpdated": now
+}]
+with open(installed_v2_path, "w") as f:
+    json.dump(installed_v2, f, indent=2)
+    f.write("\n")
+
+print(f"  Registered Qoder plugin: {plugin_key}")
+PYEOF
+}
+
 validate_plugin_mcp_config() {
     local plugin_name="$1" plugin_src="$2"
 
@@ -594,6 +688,7 @@ install_plugin_to_qoderwork() {
     # to hooks registered in settings.json. Keep only the QoderWork-specific
     # manifest in this target so generic Claude/Codex/Qoder hooks cannot run.
     rm -f "$dest/hooks/hooks.json" "$dest/hooks/codex-hooks.json" "$dest/hooks/qoder-hooks.json"
+    ensure_qoder_plugin_registration ".qoderwork" "$plugin_name" "$dest" "$plugin_src"
 
     # Built-in QoderWork hook registration (no external script needed)
     local hooks_json="$dest/hooks/qoderwork-hooks.json"
@@ -760,6 +855,7 @@ install_plugin_to_qoder() {
     # manifests from the plugin directory so the local plugin loader cannot
     # activate duplicate/generic hooks.
     rm -f "$dest/hooks/hooks.json" "$dest/hooks/codex-hooks.json" "$dest/hooks/qoderwork-hooks.json"
+    ensure_qoder_plugin_registration ".qoder" "$plugin_name" "$dest" "$plugin_src"
 
     # Built-in Qoder hook registration (same hook format as Claude/QoderWork)
     local hooks_json="$dest/hooks/qoder-hooks.json"
@@ -1152,6 +1248,56 @@ if changed:
     print(f"Updated: {path}")
 else:
     print("No hooks to remove.")
+PYEOF
+    fi
+
+    # Remove Qoder plugin registry entries.
+    if [[ ${#plugin_prefixes[@]} -gt 0 ]]; then
+        local registry_names_json
+        registry_names_json=$(printf '%s\n' "${plugin_prefixes[@]}" | python3 -c "import sys,json; print(json.dumps([(l.strip()[:-1] if l.strip().endswith('/') else l.strip()) for l in sys.stdin if l.strip()]))")
+        python3 - "$HOME" "$client_home" "$MARKETPLACE_NAME" "$registry_names_json" <<'PYEOF'
+import json
+import os
+import sys
+
+home, client_home, marketplace, names_json = sys.argv[1:]
+plugin_names = json.loads(names_json)
+plugin_keys = [f"{name}@{marketplace}" for name in plugin_names]
+
+settings_path = os.path.join(home, client_home, "settings.json")
+if os.path.isfile(settings_path):
+    with open(settings_path) as f:
+        settings = json.load(f)
+    enabled = settings.get("enabledPlugins")
+    if isinstance(enabled, dict):
+        changed = False
+        for key in plugin_keys:
+            if key in enabled:
+                del enabled[key]
+                changed = True
+        if changed:
+            with open(settings_path, "w") as f:
+                json.dump(settings, f, indent=2)
+                f.write("\n")
+
+for filename in ("installed_plugins.json", "installed_plugins-v2.json"):
+    path = os.path.join(home, client_home, "plugins", filename)
+    if not os.path.isfile(path):
+        continue
+    with open(path) as f:
+        data = json.load(f)
+    plugins = data.get("plugins")
+    if not isinstance(plugins, dict):
+        continue
+    changed = False
+    for key in plugin_keys:
+        if key in plugins:
+            del plugins[key]
+            changed = True
+    if changed:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
 PYEOF
     fi
 

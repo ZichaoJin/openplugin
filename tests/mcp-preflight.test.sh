@@ -407,6 +407,42 @@ SH
     fi
 }
 
+test_qoderwork_uninstall_handles_empty_mcp_keys() {
+    local tmp_dir out_file
+    tmp_dir="$(mktemp -d)"
+    out_file="$tmp_dir/uninstall.out"
+    trap 'rm -rf "$tmp_dir"' RETURN
+
+    mkdir -p "$tmp_dir/home/.qoderwork/plugins-custom/agent-notch/.claude-plugin"
+    cat > "$tmp_dir/home/.qoderwork/plugins-custom/agent-notch/.openplugin-meta.json" <<'JSON'
+{
+  "marketplace": "opennotch",
+  "mcp_keys": []
+}
+JSON
+    cat > "$tmp_dir/home/.qoderwork/plugins-custom/agent-notch/.claude-plugin/plugin.json" <<'JSON'
+{
+  "name": "agent-notch",
+  "repository": "git@gitlab.alibaba-inc.com:subo.jzc/opennotch.git"
+}
+JSON
+    cat > "$tmp_dir/home/.qoderwork/settings.json" <<'JSON'
+{
+  "hooks": {}
+}
+JSON
+
+    HOME="$tmp_dir/home" \
+    REPO_URL="git@gitlab.alibaba-inc.com:subo.jzc/opennotch.git" \
+    MARKETPLACE_NAME="opennotch" \
+    WANT_CLAUDE=false \
+    WANT_CODEX=false \
+    WANT_QODERWORK=true \
+    bash "$ROOT_DIR/scripts/install.sh" uninstall >"$out_file" 2>&1
+
+    test ! -d "$tmp_dir/home/.qoderwork/plugins-custom/agent-notch"
+}
+
 test_missing_mcp_command_blocks_install
 test_missing_absolute_mcp_command_blocks_install
 test_codex_manifest_must_reference_mcp_config
@@ -415,5 +451,6 @@ test_codex_mcp_plugin_is_registered_without_hooks
 test_codex_permission_request_hook_uses_codex_event_key
 test_root_plugin_repo_installs_to_qoderwork
 test_claude_marketplace_is_updated_before_plugin_install
+test_qoderwork_uninstall_handles_empty_mcp_keys
 test_github_tarball_download_uses_default_branch
 echo "mcp-preflight tests passed"

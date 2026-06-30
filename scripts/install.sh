@@ -839,10 +839,15 @@ except Exception: print('__NO_MATCH__')
                 if [[ "$meta_match" != "__NO_MATCH__" ]]; then
                     matched=true
                     # Collect MCP keys from metadata
-                    IFS=',' read -ra keys <<< "$meta_match"
-                    for k in "${keys[@]}"; do
-                        [[ -n "$k" ]] && all_mcp_keys+=("$k")
-                    done
+                    if [[ -n "$meta_match" ]]; then
+                        local keys=()
+                        IFS=',' read -ra keys <<< "$meta_match"
+                        if [[ ${#keys[@]} -gt 0 ]]; then
+                            for k in "${keys[@]}"; do
+                                [[ -n "$k" ]] && all_mcp_keys+=("$k")
+                            done
+                        fi
+                    fi
                 fi
             fi
 
@@ -871,10 +876,15 @@ try:
     print(','.join(d.get('mcpServers', {}).keys()))
 except Exception: pass
 " "$plugin_dir/.mcp.json" 2>/dev/null || true)
-                            IFS=',' read -ra keys <<< "$fallback_keys"
-                            for k in "${keys[@]}"; do
-                                [[ -n "$k" ]] && all_mcp_keys+=("$k")
-                            done
+                            if [[ -n "$fallback_keys" ]]; then
+                                local keys=()
+                                IFS=',' read -ra keys <<< "$fallback_keys"
+                                if [[ ${#keys[@]} -gt 0 ]]; then
+                                    for k in "${keys[@]}"; do
+                                        [[ -n "$k" ]] && all_mcp_keys+=("$k")
+                                    done
+                                fi
+                            fi
                         fi
                     fi
                 fi

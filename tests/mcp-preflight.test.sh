@@ -124,6 +124,38 @@ JSON
   }
 }
 JSON
+    cat > "$repo_dir/hooks/qoder-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo qoder-pre"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+    cat > "$repo_dir/hooks/codex-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo codex-pre"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
 }
 
 add_codex_hooks_to_plugin_repo() {
@@ -396,6 +428,8 @@ test_root_plugin_repo_installs_to_qoderwork() {
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/skills/root-plugin/SKILL.md"
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/qoderwork-hooks.json"
+    test ! -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/qoder-hooks.json"
+    test ! -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/codex-hooks.json"
     grep -q 'echo qoderwork-permission' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
     grep -q 'echo qoderwork-post' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
     ! grep -q 'PreToolUse' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"

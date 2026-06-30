@@ -606,6 +606,7 @@ with open(dst, "w") as f:
     json.dump(template, f, indent=2)
     f.write("\n")
 PYEOF
+        rm -f "$dest/hooks/qoder-hooks.json" "$dest/hooks/codex-hooks.json"
 
         local settings="${HOME}/.qoderwork/settings.json"
         mkdir -p "$(dirname "$settings")"

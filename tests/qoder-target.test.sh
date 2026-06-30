@@ -16,6 +16,60 @@ make_qoder_plugin_repo() {
 JSON
 
     mkdir -p "$repo_dir/plugins/test-plugin/hooks"
+    cat > "$repo_dir/plugins/test-plugin/hooks/hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_HITL_CLIENT=auto /bin/bash \"__PLUGIN_ROOT__/hooks/scripts/test.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+    cat > "$repo_dir/plugins/test-plugin/hooks/codex-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_HITL_CLIENT=codex /bin/bash \"__PLUGIN_ROOT__/hooks/scripts/test.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+    cat > "$repo_dir/plugins/test-plugin/hooks/qoderwork-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_HITL_CLIENT=qoderwork /bin/bash \"__PLUGIN_ROOT__/hooks/scripts/test.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
     cat > "$repo_dir/plugins/test-plugin/hooks/qoder-hooks.json" <<'JSON'
 {
   "hooks": {
@@ -98,6 +152,15 @@ test_qoder_install_uses_qoder_hooks_and_home() {
     grep -Fq 'AGENT_HITL_CLIENT=qoder' "$settings"
     grep -Fq "$tmp_dir/home/.qoder/plugins-custom/test-plugin" "$settings"
     grep -Fq '"test-server"' "$mcp"
+    test -f "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/qoder-hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/codex-hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/qoderwork-hooks.json"
+    if grep -Fq 'AGENT_HITL_CLIENT=auto' "$settings"; then
+        echo "qoder install must not register generic auto hooks"
+        cat "$settings"
+        return 1
+    fi
 
     if [[ -e "$tmp_dir/home/.qoderwork/settings.json" || -e "$tmp_dir/home/.qoderwork/mcp.json" ]]; then
         echo "qoder install must not write qoderwork config"

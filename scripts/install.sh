@@ -590,6 +590,11 @@ install_plugin_to_qoderwork() {
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
 
+    # QoderWork loads local plugin hook manifests from plugins-custom in addition
+    # to hooks registered in settings.json. Keep only the QoderWork-specific
+    # manifest in this target so generic Claude/Codex/Qoder hooks cannot run.
+    rm -f "$dest/hooks/hooks.json" "$dest/hooks/codex-hooks.json" "$dest/hooks/qoder-hooks.json"
+
     # Built-in QoderWork hook registration (no external script needed)
     local hooks_json="$dest/hooks/qoderwork-hooks.json"
     if [[ -f "$hooks_json" ]]; then
@@ -750,6 +755,11 @@ install_plugin_to_qoder() {
         --exclude '.DS_Store' \
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
+
+    # Qoder also gets explicit settings.json hooks. Remove other client hook
+    # manifests from the plugin directory so the local plugin loader cannot
+    # activate duplicate/generic hooks.
+    rm -f "$dest/hooks/hooks.json" "$dest/hooks/codex-hooks.json" "$dest/hooks/qoderwork-hooks.json"
 
     # Built-in Qoder hook registration (same hook format as Claude/QoderWork)
     local hooks_json="$dest/hooks/qoder-hooks.json"

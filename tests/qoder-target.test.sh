@@ -100,16 +100,18 @@ test_qoder_install_uses_qoder_hooks_and_home() {
     grep -Fq 'AGENT_HITL_CLIENT=qoder' "$settings"
     grep -Fq "$tmp_dir/home/.qoder/plugins-custom/test-plugin" "$settings"
     grep -Fq '"test-server"' "$mcp"
+    grep -Fq '"test-plugin@test-marketplace": true' "$settings"
+    grep -Fq '"test-plugin@test-marketplace"' "$installed"
+    grep -Fq '"test-plugin@test-marketplace"' "$installed_v2"
+    grep -Fq '"source": "marketplace"' "$installed_v2"
 
-    mkdir -p "$tmp_dir/home/.qoder/plugins"
-    python3 - "$settings" "$installed" "$installed_v2" "$tmp_dir/home/.qoder/plugins-custom/test-plugin" <<'PYEOF'
-import json, os, sys
+    python3 - "$settings" "$tmp_dir/home/.qoder/plugins-custom/test-plugin" <<'PYEOF'
+import json, sys
 
-settings_path, installed_path, installed_v2_path, plugin_dir = sys.argv[1:]
+settings_path, plugin_dir = sys.argv[1:]
 
 with open(settings_path) as f:
     settings = json.load(f)
-settings.setdefault("enabledPlugins", {})["test-plugin@test-marketplace"] = True
 settings.setdefault("hooks", {}).setdefault("PreToolUse", []).append({
     "matcher": "*",
     "hooks": [{
@@ -129,19 +131,6 @@ settings["hooks"].setdefault("Stop", []).append({
 })
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
-    f.write("\n")
-
-with open(installed_path, "w") as f:
-    json.dump({"plugins": {"test-plugin@test-marketplace": {"installPath": plugin_dir}}}, f, indent=2)
-    f.write("\n")
-
-with open(installed_v2_path, "w") as f:
-    json.dump({"plugins": {"test-plugin@test-marketplace": [{
-        "scope": "user",
-        "installPath": plugin_dir,
-        "version": "1.0.0",
-        "source": "local"
-    }]}}, f, indent=2)
     f.write("\n")
 PYEOF
 

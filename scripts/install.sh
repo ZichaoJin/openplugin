@@ -577,6 +577,84 @@ PYEOF
     ok "  ${plugin_name} (v${version}) → Codex CLI"
 }
 
+register_qoder_family_plugin() {
+    local client_home="$1" plugin_name="$2" plugin_src="$3" dest="$4"
+
+    local settings="${HOME}/${client_home}/settings.json"
+    local plugins_dir="${HOME}/${client_home}/plugins"
+    mkdir -p "$(dirname "$settings")" "$plugins_dir"
+
+    if [[ ! -f "$settings" ]]; then
+        echo '{}' > "$settings"
+    fi
+
+    python3 - "$settings" "$plugins_dir" "$plugin_name" "$MARKETPLACE_NAME" "$plugin_src" "$dest" <<'PYEOF'
+import datetime
+import json
+import os
+import sys
+
+settings_path, plugins_dir, plugin_name, marketplace, plugin_src, dest = sys.argv[1:]
+plugin_key = f"{plugin_name}@{marketplace}"
+
+def read_json(path, default):
+    if not os.path.isfile(path):
+        return default
+    with open(path) as f:
+        text = f.read().strip()
+    return json.loads(text) if text else default
+
+def write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+def plugin_version():
+    for rel in (".codex-plugin/plugin.json", ".claude-plugin/plugin.json"):
+        path = os.path.join(plugin_src, rel)
+        if os.path.isfile(path):
+            try:
+                value = json.load(open(path)).get("version")
+                if value:
+                    return value
+            except Exception:
+                pass
+    return "0.0.0"
+
+settings = read_json(settings_path, {})
+enabled = settings.setdefault("enabledPlugins", {})
+if isinstance(enabled, dict):
+    enabled[plugin_key] = True
+write_json(settings_path, settings)
+
+installed_path = os.path.join(plugins_dir, "installed_plugins.json")
+installed = read_json(installed_path, {"plugins": {}})
+installed.setdefault("plugins", {})[plugin_key] = {"installPath": dest}
+write_json(installed_path, installed)
+
+installed_v2_path = os.path.join(plugins_dir, "installed_plugins-v2.json")
+installed_v2 = read_json(installed_v2_path, {"plugins": {}})
+plugins = installed_v2.setdefault("plugins", {})
+existing = plugins.get(plugin_key)
+installed_at = None
+if isinstance(existing, list) and existing and isinstance(existing[0], dict):
+    installed_at = existing[0].get("installedAt")
+now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+plugins[plugin_key] = [{
+    "scope": "user",
+    "installPath": dest,
+    "version": plugin_version(),
+    "source": "marketplace",
+    "installedAt": installed_at or now,
+    "lastUpdated": now,
+}]
+write_json(installed_v2_path, installed_v2)
+
+print(f"  Registered: {plugin_key}")
+PYEOF
+}
+
 install_plugin_to_qoderwork() {
     local plugin_name="$1" plugin_src="$2"
 
@@ -664,6 +742,8 @@ with open(settings_path, "w") as f:
 print(f"  Updated: {settings_path}")
 PYEOF
     fi
+
+    register_qoder_family_plugin ".qoderwork" "$plugin_name" "$plugin_src" "$dest"
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoderwork/mcp.json
     # (QoderWork wrapper mode: only reads global mcp.json, won't discover plugin .mcp.json)
@@ -815,6 +895,8 @@ with open(settings_path, "w") as f:
 print(f"  Updated: {settings_path}")
 PYEOF
     fi
+
+    register_qoder_family_plugin ".qoder" "$plugin_name" "$plugin_src" "$dest"
 
     # Merge MCP entries from plugin's .mcp.json into ~/.qoder/mcp.json.
     local mcp_keys=""

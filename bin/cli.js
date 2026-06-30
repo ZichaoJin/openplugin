@@ -23,6 +23,9 @@ function detectClients() {
   if (fs.existsSync(path.join(os.homedir(), ".codex"))) {
     clients.push({ id: "codex", label: "Codex CLI", flag: "--codex" });
   }
+  if (fs.existsSync(path.join(os.homedir(), ".qoder"))) {
+    clients.push({ id: "qoder", label: "Qoder", flag: "--qoder" });
+  }
   if (fs.existsSync(path.join(os.homedir(), ".qoderwork"))) {
     clients.push({ id: "qoderwork", label: "QoderWork", flag: "--qoderwork" });
   }
@@ -195,7 +198,7 @@ function skillsAgentsForTargets(targets = {}) {
   const agents = [];
   if (targets.wantClaude) agents.push("claude-code");
   if (targets.wantCodex) agents.push("codex");
-  if (targets.wantQoderwork) agents.push("qoder");
+  if ((targets.wantQoder || targets.wantQoderwork) && !agents.includes("qoder")) agents.push("qoder");
   return agents;
 }
 
@@ -203,6 +206,7 @@ function clientLabelsForTargets(targets = {}) {
   const labels = [];
   if (targets.wantClaude) labels.push("Claude Code");
   if (targets.wantCodex) labels.push("Codex CLI");
+  if (targets.wantQoder) labels.push("Qoder");
   if (targets.wantQoderwork) labels.push("QoderWork");
   return labels;
 }
@@ -641,6 +645,7 @@ function installCompanionPlugin(plugin, targets, options = {}) {
         PLUGIN_FILTER: plugin.name,
         WANT_CLAUDE: String(targets.wantClaude),
         WANT_CODEX: String(targets.wantCodex),
+        WANT_QODER: String(targets.wantQoder),
         WANT_QODERWORK: String(targets.wantQoderwork),
       },
     });
@@ -660,6 +665,7 @@ function installCompanionPlugin(plugin, targets, options = {}) {
 function isCompanionInstalled(name, targets = {}, homeDir = os.homedir()) {
   if (targets.wantClaude && claudePluginInstalled(name, homeDir)) return true;
   if (targets.wantCodex && codexPluginInstalled(name, homeDir)) return true;
+  if (targets.wantQoder && fs.existsSync(path.join(homeDir, ".qoder", "plugins-custom", name))) return true;
   if (targets.wantQoderwork && fs.existsSync(path.join(homeDir, ".qoderwork", "plugins-custom", name))) return true;
   return false;
 }
@@ -805,6 +811,10 @@ function installMcpCompanion(plugin, targets, options = {}) {
     installCodexMcp(mcp, homeDir);
     installedTargets.push("Codex CLI");
   }
+  if (targets.wantQoder) {
+    installQoderMcp(mcp, homeDir);
+    installedTargets.push("Qoder");
+  }
   if (targets.wantQoderwork) {
     installQoderWorkMcp(mcp, homeDir);
     installedTargets.push("QoderWork");
@@ -843,8 +853,15 @@ function upsertCodexMcpBlock(configText, mcp) {
   return `${trimmed}${block}`;
 }
 
+function installQoderMcp(mcp, homeDir) {
+  installQoderJsonMcp(mcp, path.join(homeDir, ".qoder", "mcp.json"));
+}
+
 function installQoderWorkMcp(mcp, homeDir) {
-  const configPath = path.join(homeDir, ".qoderwork", "mcp.json");
+  installQoderJsonMcp(mcp, path.join(homeDir, ".qoderwork", "mcp.json"));
+}
+
+function installQoderJsonMcp(mcp, configPath) {
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   backupFileIfExists(configPath);
 
@@ -974,7 +991,7 @@ function agentNotchAutostartsFromHooks(selectedPlugins) {
 
 async function startAgentNotchAfterInstall(selectedPlugins, targets = {}, options = {}) {
   if (!selectedPlugins.some((item) => item.name === "agent-notch")) return false;
-  if (!targets.wantClaude && !targets.wantCodex && !targets.wantQoderwork) return false;
+  if (!targets.wantClaude && !targets.wantCodex && !targets.wantQoder && !targets.wantQoderwork) return false;
   if ((options.platform || process.platform) !== "darwin") return false;
 
   const socketPath = options.socketPath || defaultAgentNotchVibeSocketPath();
@@ -1140,6 +1157,7 @@ function latestAgentNotchVibeRuntimeDir(homeDir) {
   const candidates = [
     ...versionedAgentNotchRuntimeDirs(path.join(homeDir, ".codex", "plugins", "cache", "opentasks", "agent-notch")),
     ...versionedAgentNotchRuntimeDirs(path.join(homeDir, ".claude", "plugins", "cache", "opentasks", "agent-notch")),
+    agentNotchRuntimeDirCandidate(path.join(homeDir, ".qoder", "plugins-custom", "agent-notch", "vibe-runtime")),
     agentNotchRuntimeDirCandidate(path.join(homeDir, ".qoderwork", "plugins-custom", "agent-notch", "vibe-runtime")),
   ]
     .filter(Boolean)
@@ -1543,6 +1561,7 @@ async function main() {
     --plugin <name>    Install a specific plugin (can be used multiple times)
     --claude           Install to Claude Code only
     --codex            Install to Codex CLI only
+    --qoder            Install to Qoder only
     --qoderwork        Install to QoderWork only
     -y, --yes          Skip interactive prompts
     -h, --help         Show help
@@ -1583,7 +1602,7 @@ async function main() {
   for (let i = 0; i < flags.length; i++) {
     if (flags[i] === "--plugin" && i + 1 < flags.length) {
       pluginFilters.push(flags[++i]);
-    } else if (["--claude", "--codex", "--qoderwork"].includes(flags[i])) {
+    } else if (["--claude", "--codex", "--qoder", "--qoderwork"].includes(flags[i])) {
       clientFlags.push(flags[i]);
     } else if (flags[i] === "-y" || flags[i] === "--yes") {
       skipPrompts = true;
@@ -1604,6 +1623,7 @@ async function main() {
     const hasClientFlags = clientFlags.length > 0;
     const wantClaude = hasClientFlags ? clientFlags.includes("--claude") : true;
     const wantCodex = hasClientFlags ? clientFlags.includes("--codex") : true;
+    const wantQoder = hasClientFlags ? clientFlags.includes("--qoder") : true;
     const wantQoderwork = hasClientFlags
       ? clientFlags.includes("--qoderwork")
       : true;
@@ -1615,6 +1635,7 @@ async function main() {
           ...env,
           WANT_CLAUDE: String(wantClaude),
           WANT_CODEX: String(wantCodex),
+          WANT_QODER: String(wantQoder),
           WANT_QODERWORK: String(wantQoderwork),
         },
       });
@@ -1724,28 +1745,31 @@ async function main() {
 
   // Phase 3: select clients
   const hasClientFlags = clientFlags.length > 0;
-  let wantClaude, wantCodex, wantQoderwork;
+  let wantClaude, wantCodex, wantQoder, wantQoderwork;
   const requiresClientInstall = selectedRequiresClientInstall(selectedPlugins);
 
   if (!requiresClientInstall) {
     wantClaude = false;
     wantCodex = false;
+    wantQoder = false;
     wantQoderwork = false;
   } else if (hasClientFlags) {
     wantClaude = clientFlags.includes("--claude");
     wantCodex = clientFlags.includes("--codex");
+    wantQoder = clientFlags.includes("--qoder");
     wantQoderwork = clientFlags.includes("--qoderwork");
   } else if (skipPrompts) {
     const clients = detectClients();
     wantClaude = clients.some((c) => c.id === "claude");
     wantCodex = clients.some((c) => c.id === "codex");
+    wantQoder = clients.some((c) => c.id === "qoder");
     wantQoderwork = clients.some((c) => c.id === "qoderwork");
   } else {
     const clients = detectClients();
     if (clients.length === 0) {
       console.error(
-        "No supported AI coding client detected (Claude Code, Codex, QoderWork).\n" +
-          "Install at least one, or specify --claude / --codex / --qoderwork."
+        "No supported AI coding client detected (Claude Code, Codex, Qoder, QoderWork).\n" +
+          "Install at least one, or specify --claude / --codex / --qoder / --qoderwork."
       );
       process.exit(1);
     }
@@ -1756,10 +1780,11 @@ async function main() {
     }
     wantClaude = indices.some((i) => clients[i].id === "claude");
     wantCodex = indices.some((i) => clients[i].id === "codex");
+    wantQoder = indices.some((i) => clients[i].id === "qoder");
     wantQoderwork = indices.some((i) => clients[i].id === "qoderwork");
   }
 
-  if (requiresClientInstall && !wantClaude && !wantCodex && !wantQoderwork) {
+  if (requiresClientInstall && !wantClaude && !wantCodex && !wantQoder && !wantQoderwork) {
     console.error("No client selected.");
     process.exit(1);
   }
@@ -1767,7 +1792,7 @@ async function main() {
   if (openTasksInstall) {
     console.log(formatOpenTasksInstallPlan({
       selectedPlugins,
-      targets: { wantClaude, wantCodex, wantQoderwork },
+      targets: { wantClaude, wantCodex, wantQoder, wantQoderwork },
     }));
   }
 
@@ -1802,6 +1827,7 @@ async function main() {
           PLUGIN_FILTER: localSelectedPlugins.map((p) => p.name).join(","),
           WANT_CLAUDE: String(wantClaude),
           WANT_CODEX: String(wantCodex),
+          WANT_QODER: String(wantQoder),
           WANT_QODERWORK: String(wantQoderwork),
           TELEMETRY_OPTIN: telemetryOptin,
         },
@@ -1812,7 +1838,7 @@ async function main() {
   }
 
   try {
-    installCompanionPlugins(companionPlugins, { wantClaude, wantCodex, wantQoderwork });
+    installCompanionPlugins(companionPlugins, { wantClaude, wantCodex, wantQoder, wantQoderwork });
   } catch (e) {
     console.error(e.message || String(e));
     process.exit(e.status || 1);
@@ -1826,7 +1852,7 @@ async function main() {
     process.exit(e.status || 1);
   }
 
-  const agentNotchStarted = await startAgentNotchAfterInstall(selectedPlugins, { wantClaude, wantCodex, wantQoderwork });
+  const agentNotchStarted = await startAgentNotchAfterInstall(selectedPlugins, { wantClaude, wantCodex, wantQoder, wantQoderwork });
   if (agentNotchStarted) {
     console.log("[ok] Agent Notch started");
   }

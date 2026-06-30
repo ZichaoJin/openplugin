@@ -1,6 +1,6 @@
 #!/bin/bash
 # openplugin installer — generic plugin discovery + per-client installation
-# Supports: Claude Code, Codex CLI, QoderWork
+# Supports: Claude Code, Codex CLI, Qoder, QoderWork
 set -euo pipefail
 
 # ─── Environment (set by cli.js) ─────────────────────────────────────
@@ -9,6 +9,7 @@ MARKETPLACE_NAME="${MARKETPLACE_NAME:?MARKETPLACE_NAME is required}"
 PLUGIN_FILTER="${PLUGIN_FILTER:-}"
 WANT_CLAUDE="${WANT_CLAUDE:-false}"
 WANT_CODEX="${WANT_CODEX:-false}"
+WANT_QODER="${WANT_QODER:-false}"
 WANT_QODERWORK="${WANT_QODERWORK:-false}"
 
 # ─── Colors ───────────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ esac
 # ─── Client detection ────────────────────────────────────────────────
 has_claude()     { command -v claude >/dev/null 2>&1; }
 has_codex()      { [[ -d "${HOME}/.codex" ]]; }
+has_qoder()      { [[ -d "${HOME}/.qoder" ]]; }
 has_qoderwork()  { [[ -d "${HOME}/.qoderwork" ]]; }
 
 # ─── Repo clone / dev-mode detection ─────────────────────────────────
@@ -726,6 +728,154 @@ PYEOF
     ok "  ${plugin_name} → QoderWork"
 }
 
+install_plugin_to_qoder() {
+    local plugin_name="$1" plugin_src="$2"
+
+    local dest="${HOME}/.qoder/plugins-custom/${plugin_name}"
+    mkdir -p "$dest"
+
+    info "  Copying ${plugin_name} → ${dest}"
+    rsync -a --delete \
+        --exclude '__pycache__' \
+        --exclude '.DS_Store' \
+        --exclude '.openplugin-meta.json' \
+        "$plugin_src/" "$dest/"
+
+    # Built-in Qoder hook registration (same hook format as Claude/QoderWork)
+    local hooks_json="$dest/hooks/qoder-hooks.json"
+    if [[ -f "$hooks_json" ]]; then
+        local settings="${HOME}/.qoder/settings.json"
+        mkdir -p "$(dirname "$settings")"
+
+        if [[ -f "$settings" ]]; then
+            local ts
+            ts=$(date +%s).$$
+            cp "$settings" "$settings.bak.$ts"
+            info "  Backup: $settings.bak.$ts"
+        else
+            echo '{}' > "$settings"
+        fi
+
+        info "  Enabling hooks for ${plugin_name}..."
+        python3 - "$settings" "$hooks_json" "$dest" "${plugin_name}/" <<'PYEOF'
+import json, sys
+
+settings_path, hooks_path, plugin_root, name_prefix = sys.argv[1:]
+
+with open(settings_path) as f:
+    text = f.read().strip() or "{}"
+settings = json.loads(text)
+
+with open(hooks_path) as f:
+    template = json.load(f)
+escaped_root = json.dumps(plugin_root)[1:-1]
+template_str = json.dumps(template).replace("__PLUGIN_ROOT__", escaped_root)
+template = json.loads(template_str)
+
+settings.setdefault("hooks", {})
+hooks_root = settings["hooks"]
+
+plugin_name = name_prefix.rstrip("/")
+
+def owned(h):
+    if not isinstance(h, dict):
+        return False
+    name = h.get("name")
+    if isinstance(name, str) and name.startswith(name_prefix):
+        return True
+    command = h.get("command")
+    if not isinstance(command, str):
+        return False
+    return (
+        plugin_root in command
+        or f"/plugins-custom/{plugin_name}/" in command
+        or f"{plugin_name}/hooks/scripts/" in command
+    )
+
+for event, new_groups in template.get("hooks", {}).items():
+    existing = hooks_root.get(event)
+    if not isinstance(existing, list):
+        existing = []
+    pruned = []
+    for grp in existing:
+        if not isinstance(grp, dict):
+            pruned.append(grp); continue
+        inner = grp.get("hooks") or []
+        kept = [h for h in inner if not owned(h)]
+        if kept:
+            new_grp = dict(grp)
+            new_grp["hooks"] = kept
+            pruned.append(new_grp)
+    pruned.extend(new_groups)
+    hooks_root[event] = pruned
+
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+print(f"  Updated: {settings_path}")
+PYEOF
+    fi
+
+    # Merge MCP entries from plugin's .mcp.json into ~/.qoder/mcp.json.
+    local mcp_keys=""
+    if [[ -f "$plugin_src/.mcp.json" ]]; then
+        local mcp_config="${HOME}/.qoder/mcp.json"
+
+        if [[ -f "$mcp_config" ]]; then
+            local mcp_ts
+            mcp_ts=$(date +%s).$$
+            cp "$mcp_config" "$mcp_config.bak.$mcp_ts"
+            info "  Backup: $mcp_config.bak.$mcp_ts"
+        fi
+
+        info "  Configuring MCP for ${plugin_name}..."
+        mcp_keys=$(python3 - "${mcp_config}" "$plugin_src/.mcp.json" <<'PYEOF'
+import json, sys, os
+
+target_path, source_path = sys.argv[1:]
+
+if os.path.isfile(target_path):
+    with open(target_path) as f:
+        config = json.load(f)
+else:
+    config = {"mcpServers": {}}
+
+config.setdefault("mcpServers", {})
+
+with open(source_path) as f:
+    source = json.load(f)
+
+keys = []
+for name, server in source.get("mcpServers", {}).items():
+    if name in config["mcpServers"] and config["mcpServers"][name] != server:
+        print(f"Updating existing MCP server: {name}", file=sys.stderr)
+    config["mcpServers"][name] = server
+    keys.append(name)
+
+with open(target_path, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+
+print(",".join(keys))
+PYEOF
+)
+    fi
+
+    python3 - "$dest/.openplugin-meta.json" "$MARKETPLACE_NAME" "$mcp_keys" <<'PYEOF'
+import json, sys
+path, marketplace, mcp_keys_str = sys.argv[1:]
+meta = {
+    "marketplace": marketplace,
+    "mcp_keys": [k for k in mcp_keys_str.split(",") if k],
+}
+with open(path, "w") as f:
+    json.dump(meta, f, indent=2)
+    f.write("\n")
+PYEOF
+
+    ok "  ${plugin_name} → Qoder"
+}
+
 # ─────────────────────────────────────────────────────────────────────
 #  UNINSTALL
 # ─────────────────────────────────────────────────────────────────────
@@ -805,11 +955,14 @@ PYEOF
     ok "Codex: fully removed."
 }
 
-uninstall_qoderwork() {
-    banner "QoderWork — uninstall"
+uninstall_qoder_family() {
+    local client_label="$1"
+    local client_home="$2"
+
+    banner "${client_label} — uninstall"
 
     # Scan plugins-custom: collect metadata BEFORE deleting
-    local custom_dir="${HOME}/.qoderwork/plugins-custom"
+    local custom_dir="${HOME}/${client_home}/plugins-custom"
     local removed_any=false
     local plugin_prefixes=()
     local all_mcp_keys=()
@@ -904,7 +1057,7 @@ except Exception: pass
     fi
 
     # Remove hooks from settings.json
-    local settings="${HOME}/.qoderwork/settings.json"
+    local settings="${HOME}/${client_home}/settings.json"
     if [[ -f "$settings" && ${#plugin_prefixes[@]} -gt 0 ]]; then
         info "Removing hooks from settings.json..."
         local prefixes_json
@@ -960,7 +1113,7 @@ PYEOF
     fi
 
     # Remove MCP entries by exact keys (collected from metadata before deletion)
-    local mcp_config="${HOME}/.qoderwork/mcp.json"
+    local mcp_config="${HOME}/${client_home}/mcp.json"
     if [[ -f "$mcp_config" && ${#all_mcp_keys[@]} -gt 0 ]]; then
         info "Removing MCP server entries..."
         local keys_json
@@ -989,7 +1142,15 @@ else:
 PYEOF
     fi
 
-    ok "QoderWork: uninstalled. Restart QoderWork to apply."
+    ok "${client_label}: uninstalled. Restart ${client_label} to apply."
+}
+
+uninstall_qoder() {
+    uninstall_qoder_family "Qoder" ".qoder"
+}
+
+uninstall_qoderwork() {
+    uninstall_qoder_family "QoderWork" ".qoderwork"
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1052,6 +1213,7 @@ case "$COMMAND" in
         info "Targets: $(
             [[ "$WANT_CLAUDE" == "true" ]]    && printf 'Claude Code  '
             [[ "$WANT_CODEX" == "true" ]]     && printf 'Codex  '
+            [[ "$WANT_QODER" == "true" ]]     && printf 'Qoder  '
             [[ "$WANT_QODERWORK" == "true" ]] && printf 'QoderWork'
         )"
 
@@ -1084,6 +1246,7 @@ case "$COMMAND" in
 
             [[ "$WANT_CLAUDE" == "true" ]]    && install_plugin_to_claude "$plugin_name" "$local_src" "$version"
             [[ "$WANT_CODEX" == "true" ]]     && install_plugin_to_codex "$plugin_name" "$local_src" "$version"
+            [[ "$WANT_QODER" == "true" ]]     && install_plugin_to_qoder "$plugin_name" "$local_src"
             [[ "$WANT_QODERWORK" == "true" ]] && install_plugin_to_qoderwork "$plugin_name" "$local_src"
         done
 
@@ -1099,6 +1262,7 @@ case "$COMMAND" in
 
         [[ "$WANT_CLAUDE" == "true" ]]    && uninstall_claude
         [[ "$WANT_CODEX" == "true" ]]     && uninstall_codex
+        [[ "$WANT_QODER" == "true" ]]     && uninstall_qoder
         [[ "$WANT_QODERWORK" == "true" ]] && uninstall_qoderwork
 
         # Clean up telemetry opt-in marker

@@ -2,7 +2,7 @@
 
 Install AI coding agent plugins from Git repositories with a single command.
 
-Supports **Claude Code**, **Codex CLI**, and **QoderWork**.
+Supports **Claude Code**, **Codex CLI**, **Qoder**, and **QoderWork**.
 
 ## Usage
 
@@ -19,6 +19,7 @@ npx -y openplugin@latest <owner/repo> --plugin <name>
 # Install to a specific client only
 npx -y openplugin@latest <owner/repo> --claude
 npx -y openplugin@latest <owner/repo> --codex
+npx -y openplugin@latest <owner/repo> --qoder
 npx -y openplugin@latest <owner/repo> --qoderwork
 
 # Skip interactive prompts (install all plugins to all detected clients)
@@ -42,6 +43,7 @@ npx -y openplugin@latest remove <owner/repo>
 | `--plugin <name>` | Install a specific plugin (can be used multiple times) |
 | `--claude` | Install to Claude Code only |
 | `--codex` | Install to Codex CLI only |
+| `--qoder` | Install to Qoder only |
 | `--qoderwork` | Install to QoderWork only |
 | `-y, --yes` | Skip interactive prompts |
 | `-h, --help` | Show help |
@@ -50,7 +52,7 @@ npx -y openplugin@latest remove <owner/repo>
 
 - Node.js 18+
 - git
-- At least one supported client installed (Claude Code, Codex CLI, or QoderWork)
+- At least one supported client installed (Claude Code, Codex CLI, Qoder, or QoderWork)
 - Runtime commands referenced by plugin MCP configs. For example, if a plugin's
   `.mcp.json` uses `"command": "uvx"`, install `uv` first so `uvx` is on `PATH`.
 
@@ -90,12 +92,12 @@ npx -y skills add langfuse/skills --skill langfuse --global --yes --agent codex
 ```
 
 Client target mapping for Langfuse skills is `Claude Code -> claude-code`,
-`Codex CLI -> codex`, and `QoderWork -> qoder`.
+`Codex CLI -> codex`, and `Qoder/QoderWork -> qoder`.
 
 MCP companions are registered for the clients selected in the openplugin
 prompt. Command-based MCP companions can use tools such as `npx -y
 @playwright/mcp@latest`; HTTP MCP companions use the URLs declared by the
-downloaded repository manifest. Codex and QoderWork config files are backed up
+downloaded repository manifest. Codex, Qoder, and QoderWork config files are backed up
 before MCP entries are merged.
 
 Openplugin does not collect or configure Langfuse credentials. Configure these

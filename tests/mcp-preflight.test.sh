@@ -391,8 +391,11 @@ test_root_plugin_repo_installs_to_qoderwork() {
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/.claude-plugin/plugin.json"
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/skills/root-plugin/SKILL.md"
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/qoderwork-hooks.json"
-    test ! -e "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
     test ! -e "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/qoder-hooks.json"
+    grep -q 'echo qoderwork' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    ! grep -q 'echo generic' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    ! grep -q 'PreToolUse' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
 }
 
 test_claude_marketplace_is_updated_before_plugin_install() {

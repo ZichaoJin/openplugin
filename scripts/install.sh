@@ -669,8 +669,20 @@ install_plugin_to_qoderwork() {
         "$plugin_src/" "$dest/"
 
     if [[ -f "$dest/hooks/qoderwork-hooks.json" ]]; then
+        python3 - "$dest/hooks/qoderwork-hooks.json" "$dest/hooks/hooks.json" "$dest" <<'PYEOF'
+import json, sys
+
+src, dst, plugin_root = sys.argv[1:]
+with open(src) as f:
+    template = json.load(f)
+escaped_root = json.dumps(plugin_root)[1:-1]
+template_str = json.dumps(template).replace("__PLUGIN_ROOT__", escaped_root)
+template = json.loads(template_str)
+with open(dst, "w") as f:
+    json.dump(template, f, indent=2)
+    f.write("\n")
+PYEOF
         rm -f \
-            "$dest/hooks/hooks.json" \
             "$dest/hooks/codex-hooks.json" \
             "$dest/hooks/qoder-hooks.json"
     fi

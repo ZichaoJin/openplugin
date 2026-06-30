@@ -1097,6 +1097,7 @@ import json, sys
 
 path, prefixes_json = sys.argv[1:]
 prefixes = json.loads(prefixes_json)
+plugin_names = [p[:-1] if p.endswith("/") else p for p in prefixes]
 
 with open(path) as f:
     settings = json.load(f)
@@ -1115,9 +1116,21 @@ for event, groups in list(hooks.items()):
             pruned.append(grp)
             continue
         inner = grp.get("hooks") or []
-        kept = [h for h in inner
-                if not (isinstance(h, dict) and isinstance(h.get("name"), str)
-                        and any(h["name"].startswith(p) for p in prefixes))]
+        def owned(h):
+            if not isinstance(h, dict):
+                return False
+            name = h.get("name")
+            if isinstance(name, str) and any(name.startswith(p) for p in prefixes):
+                return True
+            command = h.get("command")
+            if not isinstance(command, str):
+                return False
+            return any(
+                f"/plugins-custom/{plugin_name}/" in command
+                or f"{plugin_name}/hooks/scripts/" in command
+                for plugin_name in plugin_names
+            )
+        kept = [h for h in inner if not owned(h)]
         if kept:
             new_grp = dict(grp)
             new_grp["hooks"] = kept

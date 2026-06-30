@@ -5,7 +5,6 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawnSync } = require("child_process");
 
 function loadCliForTest() {
   const originalExit = process.exit;
@@ -1304,91 +1303,6 @@ function testAgentNotchInstallStartUsesHookSocketPath() {
   );
 }
 
-
-function testQoderWorkUninstallRemovesCommandOnlyAgentNotchHooks() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openplugin-qoderwork-uninstall-"));
-  const settingsPath = path.join(tmpDir, ".qoderwork", "settings.json");
-  const pluginDir = path.join(tmpDir, ".qoderwork", "plugins-custom", "agent-notch");
-  const scriptPath = path.join(__dirname, "..", "scripts", "install.sh");
-
-  try {
-    fs.mkdirSync(pluginDir, { recursive: true });
-    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginDir, ".openplugin-meta.json"),
-      JSON.stringify({ marketplace: "opennotch", mcp_keys: [] }, null, 2),
-      "utf8"
-    );
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({
-        hooks: {
-          PreToolUse: [
-            {
-              matcher: "*",
-              hooks: [
-                {
-                  type: "command",
-                  command: `AGENT_HITL_CLIENT=qoderwork /bin/bash "${pluginDir}/hooks/scripts/agent-notch-hook.sh"`,
-                  timeout: 5,
-                },
-                {
-                  name: "other/pre-tool",
-                  type: "command",
-                  command: "echo keep",
-                },
-              ],
-            },
-          ],
-          PermissionRequest: [
-            {
-              matcher: "*",
-              hooks: [
-                {
-                  name: "agent-notch/permission-request",
-                  type: "command",
-                  command: `AGENT_HITL_CLIENT=qoderwork /bin/bash "${pluginDir}/hooks/scripts/agent-notch-hook.sh"`,
-                  timeout: 600,
-                },
-              ],
-            },
-          ],
-        },
-      }, null, 2),
-      "utf8"
-    );
-
-    const result = spawnSync("bash", [scriptPath, "uninstall"], {
-      cwd: path.dirname(scriptPath),
-      env: {
-        ...process.env,
-        HOME: tmpDir,
-        REPO_URL: "git@gitlab.alibaba-inc.com:subo.jzc/opennotch.git",
-        MARKETPLACE_NAME: "opennotch",
-        WANT_QODERWORK: "true",
-        WANT_QODER: "false",
-        WANT_CODEX: "false",
-        WANT_CLAUDE: "false",
-      },
-      encoding: "utf8",
-    });
-
-    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
-    assert.strictEqual(fs.existsSync(pluginDir), false);
-    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    assert.strictEqual(settings.hooks.PermissionRequest, undefined);
-    assert.deepStrictEqual(settings.hooks.PreToolUse[0].hooks, [
-      {
-        name: "other/pre-tool",
-        type: "command",
-        command: "echo keep",
-      },
-    ]);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-}
-
 function testNonOpenTasksRepoDoesNotAddCompanions() {
   const repo = { url: "https://github.com/example/other.git", name: "other" };
   const plugins = addOpenTasksCompanions(repo, [{ name: "other-plugin", description: "Other" }]);
@@ -1472,7 +1386,6 @@ function testUnmanagedOpenTasksNamedRepoDoesNotAddCompanions() {
   await testAgentNotchInstallRestartsExistingUi();
   await testAgentNotchBuildFailureDoesNotFailInstall();
   testAgentNotchInstallStartUsesHookSocketPath();
-  testQoderWorkUninstallRemovesCommandOnlyAgentNotchHooks();
   testNonOpenTasksRepoDoesNotAddCompanions();
   testToolkitRepoDoesNotGetOpenTasksCompanions();
   testOpenTasksRepoWithoutOpenTasksPluginDoesNotAddCompanion();

@@ -641,12 +641,13 @@ def owned(h):
         or f"{plugin_name}/hooks/scripts/" in command
     )
 
-for event, new_groups in template.get("hooks", {}).items():
-    existing = hooks_root.get(event)
-    if not isinstance(existing, list):
-        existing = []
+# Remove stale hooks owned by this plugin from every event first. This matters
+# when a newer plugin manifest stops declaring an event that older installs had.
+for event, groups in list(hooks_root.items()):
+    if not isinstance(groups, list):
+        continue
     pruned = []
-    for grp in existing:
+    for grp in groups:
         if not isinstance(grp, dict):
             pruned.append(grp); continue
         inner = grp.get("hooks") or []
@@ -655,8 +656,17 @@ for event, new_groups in template.get("hooks", {}).items():
             new_grp = dict(grp)
             new_grp["hooks"] = kept
             pruned.append(new_grp)
-    pruned.extend(new_groups)
-    hooks_root[event] = pruned
+    if pruned:
+        hooks_root[event] = pruned
+    else:
+        del hooks_root[event]
+
+for event, new_groups in template.get("hooks", {}).items():
+    existing = hooks_root.get(event)
+    if not isinstance(existing, list):
+        existing = []
+    existing.extend(new_groups)
+    hooks_root[event] = existing
 
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
@@ -792,12 +802,13 @@ def owned(h):
         or f"{plugin_name}/hooks/scripts/" in command
     )
 
-for event, new_groups in template.get("hooks", {}).items():
-    existing = hooks_root.get(event)
-    if not isinstance(existing, list):
-        existing = []
+# Remove stale hooks owned by this plugin from every event first. This matters
+# when a newer plugin manifest stops declaring an event that older installs had.
+for event, groups in list(hooks_root.items()):
+    if not isinstance(groups, list):
+        continue
     pruned = []
-    for grp in existing:
+    for grp in groups:
         if not isinstance(grp, dict):
             pruned.append(grp); continue
         inner = grp.get("hooks") or []
@@ -806,8 +817,17 @@ for event, new_groups in template.get("hooks", {}).items():
             new_grp = dict(grp)
             new_grp["hooks"] = kept
             pruned.append(new_grp)
-    pruned.extend(new_groups)
-    hooks_root[event] = pruned
+    if pruned:
+        hooks_root[event] = pruned
+    else:
+        del hooks_root[event]
+
+for event, new_groups in template.get("hooks", {}).items():
+    existing = hooks_root.get(event)
+    if not isinstance(existing, list):
+        existing = []
+    existing.extend(new_groups)
+    hooks_root[event] = existing
 
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)

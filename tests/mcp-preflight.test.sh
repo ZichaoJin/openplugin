@@ -105,6 +105,32 @@ add_codex_hooks_to_plugin_repo() {
 JSON
 }
 
+add_qoderwork_hooks_to_plugin_repo() {
+    local repo_dir="$1"
+
+    mkdir -p "$repo_dir/plugins/test-plugin/hooks"
+    cat > "$repo_dir/plugins/test-plugin/hooks/qoderwork-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "name": "test-plugin/permission-request",
+            "command": "AGENT_HITL_CLIENT=qoderwork /bin/bash \"__PLUGIN_ROOT__/hooks/scripts/test.sh\"",
+            "timeout": 600,
+            "statusMessage": "test"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+}
+
 test_github_tarball_download_uses_default_branch() {
     local tmp_dir out_file status fake_bin tarball
     tmp_dir="$(mktemp -d)"
@@ -343,6 +369,71 @@ test_root_plugin_repo_installs_to_qoderwork() {
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/skills/root-plugin/SKILL.md"
 }
 
+test_qoderwork_install_prunes_stale_owned_hooks() {
+    local tmp_dir out_file settings
+    tmp_dir="$(mktemp -d)"
+    out_file="$tmp_dir/install.out"
+    settings="$tmp_dir/home/.qoderwork/settings.json"
+    trap 'rm -rf "$tmp_dir"' RETURN
+
+    make_plugin_repo "$tmp_dir/clone/repo" "python3"
+    add_qoderwork_hooks_to_plugin_repo "$tmp_dir/clone/repo"
+    mkdir -p "$(dirname "$settings")"
+    cat > "$settings" <<JSON
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "name": "test-plugin/pre-tool-status",
+            "command": "AGENT_HITL_CLIENT=qoderwork /bin/bash \"$tmp_dir/home/.qoderwork/plugins-custom/test-plugin/hooks/scripts/test.sh\"",
+            "timeout": 600
+          },
+          {
+            "type": "command",
+            "name": "other-plugin/pre-tool-status",
+            "command": "echo other",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "name": "test-plugin/permission-request",
+            "command": "old command",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+    run_install "$tmp_dir" "$out_file"
+
+    grep -Fq 'test-plugin/permission-request' "$settings"
+    grep -Fq 'other-plugin/pre-tool-status' "$settings"
+    if grep -Fq 'test-plugin/pre-tool-status' "$settings"; then
+        echo "expected reinstall to prune stale owned PreToolUse hook"
+        cat "$settings"
+        return 1
+    fi
+    if grep -Fq 'old command' "$settings"; then
+        echo "expected reinstall to replace old owned PermissionRequest hook"
+        cat "$settings"
+        return 1
+    fi
+}
+
 test_claude_marketplace_is_updated_before_plugin_install() {
     local tmp_dir out_file fake_bin claude_log
     tmp_dir="$(mktemp -d)"
@@ -450,6 +541,7 @@ test_valid_mcp_command_allows_install
 test_codex_mcp_plugin_is_registered_without_hooks
 test_codex_permission_request_hook_uses_codex_event_key
 test_root_plugin_repo_installs_to_qoderwork
+test_qoderwork_install_prunes_stale_owned_hooks
 test_claude_marketplace_is_updated_before_plugin_install
 test_qoderwork_uninstall_handles_empty_mcp_keys
 test_github_tarball_download_uses_default_branch

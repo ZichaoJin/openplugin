@@ -71,6 +71,59 @@ description: Use when testing root plugin installation.
 
 # Root Plugin
 MD
+    mkdir -p "$repo_dir/hooks"
+    cat > "$repo_dir/hooks/hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo generic-pre"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo generic-permission"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+    cat > "$repo_dir/hooks/qoderwork-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo qoderwork-permission"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo qoderwork-post"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
 }
 
 add_codex_hooks_to_plugin_repo() {
@@ -341,6 +394,12 @@ test_root_plugin_repo_installs_to_qoderwork() {
 
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/.claude-plugin/plugin.json"
     test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/skills/root-plugin/SKILL.md"
+    test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    test -f "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/qoderwork-hooks.json"
+    grep -q 'echo qoderwork-permission' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    grep -q 'echo qoderwork-post' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    ! grep -q 'PreToolUse' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
+    ! grep -q 'echo generic-pre' "$tmp_dir/home/.qoderwork/plugins-custom/root-plugin/hooks/hooks.json"
 }
 
 test_claude_marketplace_is_updated_before_plugin_install() {

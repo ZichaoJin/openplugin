@@ -16,6 +16,41 @@ make_qoder_plugin_repo() {
 JSON
 
     mkdir -p "$repo_dir/plugins/test-plugin/hooks"
+    cat > "$repo_dir/plugins/test-plugin/hooks/hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo generic"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+    cat > "$repo_dir/plugins/test-plugin/hooks/codex-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo codex"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
     cat > "$repo_dir/plugins/test-plugin/hooks/qoder-hooks.json" <<'JSON'
 {
   "hooks": {
@@ -29,6 +64,24 @@ JSON
             "command": "AGENT_HITL_CLIENT=qoder /bin/bash \"__PLUGIN_ROOT__/hooks/scripts/test.sh\"",
             "timeout": 600,
             "statusMessage": "test"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+    cat > "$repo_dir/plugins/test-plugin/hooks/qoderwork-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo qoderwork"
           }
         ]
       }
@@ -104,6 +157,10 @@ test_qoder_install_uses_qoder_hooks_and_home() {
     grep -Fq '"test-plugin@test-marketplace"' "$installed"
     grep -Fq '"test-plugin@test-marketplace"' "$installed_v2"
     grep -Fq '"source": "marketplace"' "$installed_v2"
+    test -f "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/qoder-hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/codex-hooks.json"
+    test ! -e "$tmp_dir/home/.qoder/plugins-custom/test-plugin/hooks/qoderwork-hooks.json"
 
     python3 - "$settings" "$tmp_dir/home/.qoder/plugins-custom/test-plugin" <<'PYEOF'
 import json, sys

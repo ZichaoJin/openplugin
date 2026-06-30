@@ -668,6 +668,13 @@ install_plugin_to_qoderwork() {
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
 
+    if [[ -f "$dest/hooks/qoderwork-hooks.json" ]]; then
+        rm -f \
+            "$dest/hooks/hooks.json" \
+            "$dest/hooks/codex-hooks.json" \
+            "$dest/hooks/qoder-hooks.json"
+    fi
+
     # Built-in QoderWork hook registration (no external script needed)
     local hooks_json="$dest/hooks/qoderwork-hooks.json"
     if [[ -f "$hooks_json" ]]; then
@@ -820,6 +827,13 @@ install_plugin_to_qoder() {
         --exclude '.DS_Store' \
         --exclude '.openplugin-meta.json' \
         "$plugin_src/" "$dest/"
+
+    if [[ -f "$dest/hooks/qoder-hooks.json" ]]; then
+        rm -f \
+            "$dest/hooks/hooks.json" \
+            "$dest/hooks/codex-hooks.json" \
+            "$dest/hooks/qoderwork-hooks.json"
+    fi
 
     # Built-in Qoder hook registration (same hook format as Claude/QoderWork)
     local hooks_json="$dest/hooks/qoder-hooks.json"
